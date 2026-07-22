@@ -1,55 +1,90 @@
 # CLAUDE.md — crm-demo
 
-CRM Demo — a deliberately generic multi-tenant CRM (organizations, people, activities, deals) run as a live public demonstration of the studio's SaaS capability; synthetic data only, published demo logins.
+CRM Demo — a deliberately generic multi-tenant CRM (Organizations, People,
+Activities, Deals on a sales pipeline) run as a **live public demonstration
+of the studio's SaaS capability**, for attracting Sysop Prime customers.
 
-This is a project repo of the **Bussetech Software Studio** — an agentic system that
-manages a GitHub org, its repos, and their web presence with minimal human
-touch. The studio's control repo is `bussetech/platform`; its front door is the
-portal at `https://bussetech.com`. This repo publishes a static site to
-`https://crm-demo.bussetech.com`.
+This is a project repo of the **Bussetech Software Studio** — an agentic
+system that manages a GitHub org, its repos, and their web presence with
+minimal human touch. The studio's control repo is `bussetech/platform`; its
+front door is the portal at `https://bussetech.com`. This repo ships a
+Cloudflare Worker that will serve at `https://crm-demo.bussetech.com` —
+**a Workers route, never GitHub Pages** (founding ADR-0055 in the platform
+repo; do not run pages-wire for this repo).
 
-> Founding note: this file was created from the studio's project template.
-> The founding PR replaces this preamble with project-specific guidance
-> (data model, sources, jobs); the studio sections below should survive.
+Intent of record: `platform/docs/steerco/2026-07-22-crm-demo-priority.md`.
+Build pattern: `platform/docs/saas-stratum.md` + ADR-0048 — read it before
+writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
 
-## How this repo works
+## Track laws (CRMDEMO-EPIC1 — verify against the records, then obey)
 
-- **Site:** Jekyll + the shared studio theme, pinned by tag in `_config.yml`
-  (`remote_theme:`). Never pin to a branch; bump versions canary-first
-  (theme repo `docs/versioning.md`). Design rules: theme `docs/design.md` —
-  Swiss typography, color is wayfinding only.
-- **Data:** text-based stores in `data/`, one JSON Schema per dataset in
-  `schema/` (`schema/<name>.schema.json` ↔ `data/<name>.*` — the studio
-  data CI validates the pair). Published datasets are CC BY 4.0 and must
-  state provenance in `data/index.md`.
-- **Feed:** the theme publishes `/feed.json` (JSON Feed 1.1) from `_posts/`.
-  The portal aggregates it — writing a post is how this project surfaces on
-  the studio homepage.
-- **Visibility:** `public` (declared in the control repo's
-  `platform.yml`, the single source of truth). All machinery keys off that
-  entry — do not contradict it here. For `private-published`: the site is
-  public while the repo stays private; never emit repo URLs or source maps
-  into the built site (the theme enforces this off `studio.visibility`).
-- **CI:** `.github/workflows/ci.yml` calls the studio's shared reusable
-  workflows (`bussetech/ci@v1` — site build/link/leak checks + data schema
-  validation). `deploy.yml` builds and publishes to GitHub Pages, then pings
-  the portal (`repository_dispatch: studio-content-updated` on `bussetech/www`)
-  so it re-aggregates promptly.
-- **Gnomes** (studio agents): check the central registry
-  (`platform/gnomes.yml`) and the reuse protocol (`platform/docs/gnome-reuse.md`)
-  before building anything agentic here. Gnome dirs homed in this repo live
-  under `gnomes/`. Deterministic work is code, not a gnome.
+1. **The isolation proof is the spine.** Nothing ships, deploys, or demos
+   until the proof (every role × every tenant, exact row counts,
+   cross-tenant = zero rows, anonymous = nothing, write refusals verified)
+   is green. Re-run it green after any schema or policy change. It is also
+   a headline demo beat.
+2. **Generic on purpose.** No opinionated CRM features (no email sync, no
+   scoring/AI gimmicks, no integrations). Any "wouldn't it be cool" feature
+   becomes a deferral issue, not a build. The studio is the subject; the
+   CRM is the canvas.
+3. **Security NFRs are never demo-grade.** Published demo credentials are a
+   deliberate, contained posture: signup stays disabled, accounts are
+   seed-provisioned, blast radius is one synthetic tenant until the next
+   reset, rate limits + body caps + no uploads in v1.
+   Availability/durability/perf are demo-grade and stated honestly (in-app
+   synthetic-data banner; no SLA claims anywhere).
+4. **Synthetic data only, scenario-first.** Clearly fictional names; no
+   real PII by rule and by construction. Seeds make the four demo
+   scenarios walkable on a fresh reset without setup.
+5. **Honest capture, zero exceptions.** Everything demoed, filmed, or
+   claimed is running software. Never describe unbuilt things as running.
+6. **No new gnomes in v1** (reuse rubric: deterministic work is code).
+   Seed/reset is code; the "living pipeline" activity-drip gnome is a
+   named deferral issue.
+
+## Demo posture
+
+- **Multi-tenant:** 2–3 synthetic companies; the isolation proof runs
+  across all of them.
+- **Published per-role demo logins** on the site (Supabase auth;
+  self-signup disabled; accounts seed-provisioned). Roles per tenant:
+  rep / manager / tenant-admin (exact set fixed by the schema sessions).
+- **Scheduled reset to scenario baseline** — Workers cron in the app plane
+  (never GitHub Actions), receipt per run in `job_runs`. Cadence: H-class
+  ruling open on platform (recommended default nightly 04:00 ET +
+  on-demand dispatch + demo-freeze switch).
+- **The four demo scenarios** (seeds are built to these):
+  1. Pipeline walkthrough — deals across stages to a close.
+  2. Day-in-the-life data entry — a rep logging activities and contacts.
+  3. Manager view — pipeline health across the team.
+  4. Tenant admin / provisioning — roles, users, tenant settings.
+
+## Local development
+
+- **Port block: 5444x** (54440–54449) — recorded here per the studio's
+  local-coexistence convention (eaap holds 5442x, studio-portal 5443x,
+  genmurk 5454x). `supabase start` from this repo uses these ports via
+  `supabase/config.toml` (`project_id = "crm-demo"`; analytics sidecar
+  disabled — it contends across coexisting stacks).
+- **Never stop or reset a Supabase stack you find running** — it is
+  someone else's live session. Local stacks are per-`project_id`, not
+  per-worktree.
+- `npm run dev` (wrangler), `npm run typecheck`, `npm test`,
+  `npm run test:isolation` (once the proof exists), `npm run db:reset`.
 
 ## Working rules
 
 - Conventional commits (`feat:`, `fix:`, `docs:`, …), atomic.
-- Once the site is live, changes go through PRs; gnome/bot changes are
-  always PRs — humans merge.
+- Changes go through PRs; gnome/bot changes are always PRs — humans merge.
 - Decisions a human must make become orange `needs-human` issues (with a
-  recommendation and a default action). Status flows through the site feed
-  and the portal, never through issues.
-- Don't hardcode org/domain/branding beyond what the factory stamped into
-  `_config.yml` — if those facts change, the studio re-stamps them.
+  recommendation and a default action).
+- Deploys are `workflow_dispatch`-deliberate, journal receipts to the
+  `deploys` branch, and `/healthz` returns the shipped build id
+  (ADR-0048 §3). Runtime secrets live in provider-native stores
+  (`wrangler secret put`, Supabase config) — never GitHub Secrets beyond
+  the repo-scoped deploy credential, never this repo, never chat.
+- Every session ends with a handoff on the platform repo plus
+  `session_meter` and `session_cost` ledger appends.
 
 ## Working alongside studio agents — for humans and their AI tools
 
@@ -82,20 +117,17 @@ and the repo itself is the collaboration protocol (STEERCO 4c, ADR-0042).
 
 This repo must keep working without the studio; its only bindings are:
 
-1. **Registry entry** in `bussetech/platform` `platform.yml` — gone means the
-   studio stops managing DNS/portal/UAT for it. Nothing in this repo breaks.
-2. **Shared CI callers** (`ci.yml`): both jobs are guarded by
-   `if: github.repository_owner == 'bussetech'` and skip green outside the
-   org. To keep real CI after detaching, replace them with a plain
-   `jekyll build` job (and any schema validation you want to keep).
-3. **Deploy workflow** (`deploy.yml`): same owner guard. After detaching,
-   remove the guard, drop the `ping-portal` job (the dispatch secrets and
-   target are studio-specific), and wire GitHub Pages (or any static host)
-   for the new home. The custom domain `crm-demo.bussetech.com` is
-   studio DNS and does not travel.
-4. **Theme**: `remote_theme: bussetech/theme@<tag>` is a public repo — it
-   keeps working detached. To cut the last tie, vendor the theme or switch
-   to any Jekyll theme.
+1. **Registry entry** in `bussetech/platform` `platform.yml` — gone means
+   the studio stops managing DNS/portal/UAT for it. Nothing in this repo
+   breaks.
+2. **Shared CI shell** (`app-shell.yml`): guarded by
+   `if: github.repository_owner == 'bussetech'` and skips green outside
+   the org. The project-owned `ci.yml` runs anywhere.
+3. **Deploy workflow** (`deploy.yml`): Cloudflare account/token secrets
+   are studio-provisioned; point them at your own account to keep
+   deploying. The custom domain `crm-demo.bussetech.com` is studio DNS
+   and does not travel.
+4. **Supabase**: the local stack (`supabase start`) and all proofs run
+   anywhere; the hosted project is provisioned per-owner.
 
-Local build never needs studio access: `bundle install && bundle exec
-jekyll serve`.
+Local build never needs studio access: `npm ci && npm test`.

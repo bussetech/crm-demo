@@ -1,13 +1,11 @@
-# ci — thin callers into the studio's shared CI (EPIC1-06, ADR-0010/0011).
+# ci — the PROJECT-OWNED jobs (typecheck, unit tests). The studio app-CI
+# shell rides its own workflow (app-shell.yml) so an unresolvable reusable
+# reference can never hold these jobs hostage (the eaap lesson).
 #
-# site: Jekyll build + link check + HTML validation + discoverability +
-#       source-leak check (for private-published).
-# data: JSON Schema validation of data/ against schema/ (convention:
-#       schema/<name>.schema.json ↔ data/<name>.*), plus an optional
-#       repo-provided integrity hook.
-#
-# Both jobs skip (green) outside the studio org — detach procedure in
-# CLAUDE.md. Pin @v1 (moving major tag), never @main.
+# The isolation-proof job (real local Supabase stack on the runner, the
+# stratum's launch-blocker bar since EPIC5-02) is added the session the
+# first schema + RLS migrations land — there is nothing to prove before
+# that, and a green no-op proof would be a false receipt.
 name: ci
 
 on:
@@ -19,11 +17,14 @@ permissions:
   contents: read
 
 jobs:
-  site:
-    if: ${{ github.repository_owner == 'bussetech' }}
-    uses: bussetech/ci/.github/workflows/reusable-site-ci.yml@v1
-    with:
-      visibility: public # factory:visibility — stamped by new-project.sh
-  data:
-    if: ${{ github.repository_owner == 'bussetech' }}
-    uses: bussetech/ci/.github/workflows/reusable-data-ci.yml@v1
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.2.2
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

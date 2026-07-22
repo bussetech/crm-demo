@@ -1,0 +1,35 @@
+# Cloudflare Workers config — Workers-class PROD per ADR-0023 §2 / the
+# SaaS stratum (ADR-0048). No secrets in this file, ever: runtime secrets
+# live in Workers secrets / Supabase config (provider-native stores,
+# ADR-0023 §3). Values here are names and non-secret config only.
+#
+# PROD serves at crm-demo.bussetech.com as a Worker custom domain — never
+# GitHub Pages (founding ADR-0055 §2). Wiring the hostname is the go-live
+# provisioning act (CRMDEMO-EPIC1-07, the sysop's clock); no route is
+# configured here until then.
+name = "crm-demo"
+main = "src/index.tsx"
+compatibility_date = "2026-07-01"
+# supabase-js relies on Node builtins (Buffer); nodejs_compat is the
+# supported Workers path for it (stratum gotcha).
+compatibility_flags = ["nodejs_compat"]
+
+# Runtime observability (ADR-0023 §1): Workers Logs capture structured
+# console output.
+[observability]
+enabled = true
+
+# The reset-to-baseline job runs in the APP PLANE (stratum law — never
+# GitHub Actions). Cadence is an open H-class ruling (recommended default:
+# nightly 04:00 ET = 08:00 UTC); the cron lands with the reset job itself
+# in a later session — declared here as intent, not yet scheduled.
+# [triggers]
+# crons = ["0 8 * * *"]
+
+# Non-secret vars. SUPABASE_URL is per-environment; the anon key is public
+# by design (RLS is the boundary); the service-role key is a Workers
+# *secret* (wrangler secret put SUPABASE_SERVICE_ROLE_KEY) — never here.
+[vars]
+SUPABASE_URL = ""
+SUPABASE_ANON_KEY = ""
+APP_BUILD_ID = "dev"
