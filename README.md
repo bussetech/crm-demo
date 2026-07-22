@@ -1,12 +1,12 @@
-# __PROJECT_NAME__
+# crm-demo
 
 **Status:** ![status](https://img.shields.io/badge/status-active-00843D) ·
-[![ci](https://github.com/__ORG__/__PROJECT_NAME__/actions/workflows/ci.yml/badge.svg)](https://github.com/__ORG__/__PROJECT_NAME__/actions/workflows/ci.yml)
-· **Site:** <https://__PROJECT_NAME__.__DOMAIN__> · **Visibility:** `__VISIBILITY__`
+[![ci](https://github.com/bussetech/crm-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/bussetech/crm-demo/actions/workflows/ci.yml)
+· **Site:** <https://crm-demo.bussetech.com> · **Visibility:** `public`
 
-__PROJECT_DESCRIPTION__
+CRM Demo — a deliberately generic multi-tenant CRM (organizations, people, activities, deals) run as a live public demonstration of the studio's SaaS capability; synthetic data only, published demo logins.
 
-A [__STUDIO_NAME__](https://__DOMAIN__) project: a static site
+A [Bussetech Software Studio](https://bussetech.com) project: a static site
 (Jekyll, shared studio theme) rendered from text-based data stores.
 
 ## Layout

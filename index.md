@@ -1,11 +1,11 @@
 ---
 layout: home
-title: __PROJECT_NAME__
-description: __PROJECT_DESCRIPTION_YAML__
+title: crm-demo
+description: "CRM Demo — a deliberately generic multi-tenant CRM (organizations, people, activities, deals) run as a live public demonstration of the studio's SaaS capability; synthetic data only, published demo logins."
 ---
 
-__PROJECT_DESCRIPTION__
+CRM Demo — a deliberately generic multi-tenant CRM (organizations, people, activities, deals) run as a live public demonstration of the studio's SaaS capability; synthetic data only, published demo logins.
 
-This is a [__STUDIO_NAME__](https://__DOMAIN__) project. Its data lives in
+This is a [Bussetech Software Studio](https://bussetech.com) project. Its data lives in
 this repo as text — see [the datasets](/data/) — and the site is rebuilt
 from it on every change.
