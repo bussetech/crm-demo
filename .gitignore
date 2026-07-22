@@ -1,6 +1,7 @@
-_site/
-.jekyll-cache/
-.jekyll-metadata
-.bundle/
-vendor/
+node_modules/
+.wrangler/
+supabase/.temp/
+supabase/.branches/
+.env
+.env.*
 .DS_Store

@@ -1,0 +1,26 @@
+{
+  "name": "crm-demo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CRM Demo — a deliberately generic multi-tenant CRM run as a live public demonstration of the studio's SaaS capability",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude 'test/isolation.test.ts'",
+    "test:isolation": "vitest run test/isolation.test.ts",
+    "db:reset": "supabase db reset",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "@types/node": "^26.1.1",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

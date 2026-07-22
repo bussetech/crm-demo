@@ -2,34 +2,50 @@
 
 **Status:** ![status](https://img.shields.io/badge/status-active-00843D) ·
 [![ci](https://github.com/bussetech/crm-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/bussetech/crm-demo/actions/workflows/ci.yml)
-· **Site:** <https://crm-demo.bussetech.com> · **Visibility:** `public`
+· **Site:** `https://crm-demo.bussetech.com` (goes live at the end of the
+build — nothing is hosted yet) · **Visibility:** `public`
 
-CRM Demo — a deliberately generic multi-tenant CRM (organizations, people, activities, deals) run as a live public demonstration of the studio's SaaS capability; synthetic data only, published demo logins.
+CRM Demo — a deliberately generic multi-tenant CRM (Organizations, People,
+Activities, Deals on a sales pipeline) built as a **live public
+demonstration** of the [Bussetech Software Studio](https://bussetech.com)'s
+SaaS capability. The studio is the subject; the CRM is the canvas.
 
-A [Bussetech Software Studio](https://bussetech.com) project: a static site
-(Jekyll, shared studio theme) rendered from text-based data stores.
+- **Multi-tenant with the isolation proof as a headline exhibit** — RLS at
+  the data layer, an explicit grant matrix, and a test suite that signs in
+  as every role against every tenant and asserts exact row counts.
+- **Synthetic data only**, built to four walkable demo scenarios, reset to
+  baseline on a schedule. Per-role demo logins will be published on the
+  site itself (signup stays disabled; accounts are seed-provisioned).
+- **Everything claimed is running software** — the studio's honest-capture
+  law. This README updates as reality does, not ahead of it.
+
+## Stack
+
+Cloudflare Workers (Hono + SSR JSX) + Supabase (Postgres/RLS/auth), per
+the studio's SaaS stratum (`platform/docs/saas-stratum.md`, ADR-0048).
+Build record of the deviations a public demo takes deliberately:
+platform ADR-0055.
 
 ## Layout
 
 | path | what |
 | --- | --- |
-| `data/` | the datasets — JSON/YAML/CSV/Markdown, versioned in git |
-| `schema/` | JSON Schemas; CI validates `data/<name>.*` against `schema/<name>.schema.json` |
-| `_posts/` | site posts — each one becomes a `/feed.json` item the studio portal aggregates |
-| `gnomes/` | project gnome directories (stub — see `gnomes/README.md`) |
-| `.github/workflows/` | thin callers into the studio's shared CI + the Pages deploy |
+| `src/` | the Worker (Hono app; `/healthz` is the only route so far) |
+| `supabase/` | local stack config + migrations (schema arrives by session) |
+| `test/` | vitest suites; the isolation proof lands with the schema |
+| `.github/workflows/` | project CI + studio app-CI shell + dispatch-only deploy |
 
 ## Build locally
 
 ```sh
-bundle install
-bundle exec jekyll serve      # http://127.0.0.1:4000
+npm ci
+npm run typecheck && npm test
+supabase start   # local stack on ports 54440–54449 (see CLAUDE.md)
 ```
 
-No studio access needed — the theme and CI machinery are public. See
-`CLAUDE.md` for how this repo fits the studio (and how it detaches from it).
+No studio access needed. See `CLAUDE.md` for conventions and the detach
+procedure.
 
-## Licenses
+## License
 
-Code: MIT (`LICENSE`). Published datasets: CC BY 4.0 — license and
-provenance statements live in `data/index.md`.
+Code: MIT (`LICENSE`). All demo data is synthetic and clearly fictional.
