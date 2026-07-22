@@ -1,0 +1,14 @@
+-- No SQL seed. The scenario baseline is built by scripts/seed.ts (the
+-- deterministic, re-appliable seed runner): it provisions the demo auth
+-- users through the admin API, then builds every tenant's world through
+-- the REAL lifecycle — orgs/people/deals created with the seeded users'
+-- own JWTs, deals walked stage by stage so the transition triggers write
+-- the audit trail (the stratum's seeds-walk-the-real-lifecycle rule).
+--
+--   supabase db reset          # migrations only (this file is a no-op)
+--   npm run seed               # the scenario baseline
+--   npm run test:isolation     # the proof, green before anything ships
+--
+-- PROD seeding is the same script pointed at the hosted stack — that is
+-- the go-live provisioning act's data half (CRMDEMO-EPIC1-07), not a
+-- default credential in sight until then.
