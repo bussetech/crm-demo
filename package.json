@@ -8,8 +8,10 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'test/isolation.test.ts'",
-    "test:isolation": "vitest run test/isolation.test.ts",
+    "test:isolation": "scripts/run-isolation.sh",
+    "seed": "scripts/stack-env.sh npx tsx scripts/seed.ts",
     "db:reset": "supabase db reset",
+    "db:rebuild": "supabase db reset && npm run seed && npm run test:isolation",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
@@ -19,6 +21,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260708.1",
     "@types/node": "^26.1.1",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.0.0"
