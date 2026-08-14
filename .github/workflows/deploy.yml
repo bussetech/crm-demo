@@ -49,7 +49,7 @@ jobs:
       # the proof asserts exact counts against the scenario baseline, so
       # the gate seeds the runner's local stack first (never PROD from here)
       - run: npm run seed
-      - name: THE ISOLATION PROOF (launch blocker)
+      - name: THE ISOLATION PROOF + THE ROUTE PROOF (launch blockers)
         run: npm run test:isolation
       - if: always()
         run: supabase stop

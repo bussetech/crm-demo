@@ -2,10 +2,13 @@
 # shell rides its own workflow (app-shell.yml) so an unresolvable reusable
 # reference can never hold these jobs hostage (the eaap lesson).
 #
-# The isolation-proof job runs THE PROOF against a real local Supabase
+# The isolation-proof job runs THE PROOFS against a real local Supabase
 # stack on the runner (the stratum's launch-blocker bar since EPIC5-02):
-# migrate → seed the scenario baseline → prove isolation. It gates every
-# push and PR, not just deploys.
+# migrate → seed the scenario baseline → prove isolation at the row level
+# (test/isolation.test.ts) → prove it again at the rendered page through
+# the real Worker (test/routes.test.ts, CRMDEMO-EPIC1-03). Both run under
+# `npm run test:isolation`, in that order, and gate every push and PR —
+# not just deploys.
 name: ci
 
 on:
@@ -43,7 +46,7 @@ jobs:
       - run: npm ci
       - run: supabase start
       - run: npm run seed
-      - name: THE ISOLATION PROOF (launch blocker)
+      - name: THE ISOLATION PROOF + THE ROUTE PROOF (launch blockers)
         run: npm run test:isolation
       - if: always()
         run: supabase stop
