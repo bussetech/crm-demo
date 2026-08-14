@@ -7,6 +7,10 @@ export const MEMBER_ROLES = ["admin", "manager", "rep"] as const;
 
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 
+/** A role name that arrived in a request is a string until this says otherwise. */
+export const isMemberRole = (value: string): value is MemberRole =>
+  (MEMBER_ROLES as readonly string[]).includes(value);
+
 export type Membership = {
   role: MemberRole;
   active: boolean;
@@ -28,6 +32,19 @@ export const canUpdateDeal = (m: Membership, isOwner: boolean): boolean =>
 
 /** The only exit from won/lost — manager/admin, always audited. */
 export const canReopenDeal = (m: Membership): boolean =>
+  m.active && (m.role === "admin" || m.role === "manager");
+
+/**
+ * The manager rollups (CRMDEMO-EPIC1-05) — manager and admin.
+ *
+ * Read what this is NOT: a confidentiality boundary. Every active member
+ * may read the tenant's deals and activities one by one (the read policies
+ * say so, deliberately — a rep works a shared pipeline), so a rep could
+ * add the same numbers up from /deals by hand. This decides who is OFFERED
+ * the rollup, and the reports page says as much rather than implying the
+ * database is keeping a secret it is not keeping.
+ */
+export const canReadReports = (m: Membership): boolean =>
   m.active && (m.role === "admin" || m.role === "manager");
 
 /** Membership administration (role changes, deactivation) — admin only. */

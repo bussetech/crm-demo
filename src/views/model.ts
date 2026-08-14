@@ -303,9 +303,61 @@ export async function loadActivities(
   return rows<Record<string, unknown>>(data, error, "activities").map(asActivity);
 }
 
+// ------------------------------------------------------------ report reads
+//
+// The manager rollups (CRMDEMO-EPIC1-05) are computed in the Worker from
+// rows this reader's own JWT was given — there is no materialized total
+// anywhere, and no number on a report page the database could not be asked
+// to produce again. Both loaders below therefore report TWO things: the
+// rows, and how many rows the database says match. A report that quietly
+// summed a truncated page would be the `/audit` "Every write…" overclaim
+// again (CRMDEMO-EPIC1-04), so the caller is handed what it needs to say
+// so out loud.
+
+/** A cap large enough for the demo's data and small enough to bound a request. */
+export const REPORT_ROW_CAP = 1000;
+
+export type Counted<T> = { rows: T[]; total: number; complete: boolean };
+
+const counted = <T>(rows: T[], total: number | null): Counted<T> => {
+  const matched = total ?? rows.length;
+  return { rows, total: matched, complete: rows.length >= matched };
+};
+
+/** Every deal this reader may see, with the database's own count beside it. */
+export async function loadDealsForReport(db: SupabaseClient): Promise<Counted<Deal>> {
+  const { data, error, count } = await db
+    .from("deals")
+    .select(DEAL_COLUMNS, { count: "exact" })
+    .order("amount", { ascending: false })
+    .limit(REPORT_ROW_CAP);
+  return counted(rows<Record<string, unknown>>(data, error, "deals for report").map(asDeal), count);
+}
+
+/** The two fields an activity-volume rollup needs, and nothing else. */
+export type ActivityPulse = { type: Activity["type"]; occurredAt: string };
+
+export async function loadActivityPulse(
+  db: SupabaseClient,
+  sinceIso: string,
+): Promise<Counted<ActivityPulse>> {
+  const { data, error, count } = await db
+    .from("activities")
+    .select("type, occurred_at", { count: "exact" })
+    .gte("occurred_at", sinceIso)
+    .order("occurred_at", { ascending: false })
+    .limit(REPORT_ROW_CAP);
+  const pulses = rows<{ type: Activity["type"]; occurred_at: string }>(
+    data,
+    error,
+    "activity volume",
+  ).map((r) => ({ type: r.type, occurredAt: r.occurred_at }));
+  return counted(pulses, count);
+}
+
 // ------------------------------------------------------------ audit trail
 
-const AUDIT_COLUMNS = "id, action, actor_id, entity_type, entity_id, detail, created_at";
+const AUDIT_COLUMNS ="id, action, actor_id, entity_type, entity_id, detail, created_at";
 
 type AuditRow = {
   id: number;
