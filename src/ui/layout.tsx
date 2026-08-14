@@ -7,28 +7,35 @@
 import type { Child } from "hono/jsx";
 
 import type { CrmProfile } from "../env";
-import { canReadAuditLog } from "../domain/roles";
+import {
+  canManageMemberships,
+  canReadAuditLog,
+  canReadReports,
+  type Membership,
+} from "../domain/roles";
 import { ROLE_LABEL } from "../views/format";
+import { BANNER_TEXT, resetBanner } from "../views/demo";
 
-export { ROLE_LABEL };
-
-export const BANNER_TEXT = "Demo environment — synthetic data, resets on schedule.";
+export { ROLE_LABEL, BANNER_TEXT };
 
 /**
- * `adminOnly` is an AFFORDANCE flag, not a gate: /audit is reachable by
- * anyone signed in, and reads zero rows for anyone who is not an admin
- * because the policy says so. Hiding the link keeps a demo tidy; it is not
- * what keeps the trail private.
+ * `see` is an AFFORDANCE predicate, not a gate. Two of these routes are
+ * reachable by anyone signed in and simply hand back nothing useful
+ * (/audit reads zero rows for a non-admin because the policy says so);
+ * two answer 403 in the router as wayfinding. Neither is what keeps
+ * anything private — hiding a link keeps a demo tidy, and that is all.
  */
-const NAV = [
-  { href: "/", label: "Overview", adminOnly: false },
-  { href: "/organizations", label: "Organizations", adminOnly: false },
-  { href: "/people", label: "People", adminOnly: false },
-  { href: "/deals", label: "Deals", adminOnly: false },
-  { href: "/deals/board", label: "Pipeline", adminOnly: false },
-  { href: "/activities", label: "Activity", adminOnly: false },
-  { href: "/audit", label: "Audit trail", adminOnly: true },
-] as const;
+const NAV: { href: string; label: string; see: (m: Membership) => boolean }[] = [
+  { href: "/", label: "Overview", see: () => true },
+  { href: "/organizations", label: "Organizations", see: () => true },
+  { href: "/people", label: "People", see: () => true },
+  { href: "/deals", label: "Deals", see: () => true },
+  { href: "/deals/board", label: "Pipeline", see: () => true },
+  { href: "/activities", label: "Activity", see: () => true },
+  { href: "/reports", label: "Reports", see: canReadReports },
+  { href: "/audit", label: "Audit trail", see: canReadAuditLog },
+  { href: "/admin/users", label: "Users", see: canManageMemberships },
+];
 
 /** The nav item a path belongs to — longest matching prefix, "/" exact. */
 export const currentNav = (path: string): string => {
@@ -38,13 +45,19 @@ export const currentNav = (path: string): string => {
   return match?.href ?? "";
 };
 
+/**
+ * The synthetic-data banner. Its second sentence is NOT written here: the
+ * reset posture comes from src/views/demo.ts, so this banner and the
+ * public credentials page cannot drift into telling a visitor two
+ * different stories about when their changes go away. Until the reset job
+ * ships (CRMDEMO-EPIC1-06) both of them say so.
+ */
 function Banner() {
   return (
     <div class="banner" role="note">
       <div class="banner-inner">
-        <strong>Demo environment</strong> — every organization, person and deal here is
-        synthetic. Data resets to the scenario baseline on a schedule; anything you change
-        is temporary and visible to everyone using this tenant.
+        <strong>Demo environment</strong> — every organization, person and deal here is synthetic.{" "}
+        {resetBanner()} <a href="/demo">Demo logins and posture →</a>
       </div>
     </div>
   );
@@ -85,8 +98,10 @@ export function Shell(props: {
   children?: Child;
 }) {
   const active = currentNav(props.path);
-  const seesAudit = canReadAuditLog({ role: props.profile.membership.role, active: true });
-  const items = NAV.filter((item) => !item.adminOnly || seesAudit);
+  // a session only exists for an ACTIVE membership (src/auth.ts), so the
+  // affordance question is only ever about the role
+  const membership: Membership = { role: props.profile.membership.role, active: true };
+  const items = NAV.filter((item) => item.see(membership));
   return (
     <html lang="en">
       <Head title={props.title} />
@@ -188,6 +203,9 @@ export const FLASH: Record<string, string> = {
   stage: "Stage updated — the database recorded the move.",
   reopened: "Reopened. The reason is in the audit trail, against your name.",
   logged: "Activity logged.",
+  role: "Role changed. The audit trail has it, against your name.",
+  deactivated: "Access removed. That account can still sign in and will be told it has no access.",
+  activated: "Access restored. That account can sign in again.",
 };
 
 export function Flash({ code }: { code?: string }) {
