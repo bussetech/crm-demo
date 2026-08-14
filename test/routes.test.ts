@@ -291,6 +291,15 @@ describe("role × route", () => {
   it("the banner text stays the standing one-liner the record names", () => {
     expect(BANNER_TEXT).toBe("Demo environment — synthetic data, resets on schedule.");
   });
+
+  it("no page renders a style attribute its own CSP would throw away", async () => {
+    // the real-browser regression (04): style-src 'self' blocks style
+    // ATTRIBUTES too, so an inline one is dead markup plus a console error
+    for (const path of APP_ROUTES) {
+      const html = await (await get(path, cookieOf(wumpus, "ada"))).text();
+      expect(html, `${path} renders an inline style`).not.toContain('style="');
+    }
+  });
 });
 
 // ------------------------------------------------------------ what a tenant sees
@@ -455,7 +464,7 @@ describe("detail surfaces", () => {
     const reopened = wumpus.deals.find((d) => d.reopened)!;
     const id = dealIdByName.get(reopened.name)!;
     const html = await (await get(`/deals/${id}`, cookieOf(wumpus, "ada"))).text();
-    expect(html).toContain("Stage history");
+    expect(html).toContain("Deal history");
     expect(html).toContain("Reopened");
     expect(html).toContain("Negotiation → Won");
   });
@@ -464,7 +473,7 @@ describe("detail surfaces", () => {
     const reopened = wumpus.deals.find((d) => d.reopened)!;
     const id = dealIdByName.get(reopened.name)!;
     const html = await (await get(`/deals/${id}`, cookieOf(wumpus, "riley"))).text();
-    expect(html).toContain("Stage history");
+    expect(html).toContain("Deal history");
     expect(html).toContain("tenant admins only");
     expect(html).not.toContain("Negotiation → Won");
   });
