@@ -212,6 +212,59 @@ button.quiet:hover, .button.quiet:hover { background: var(--gray-100); }
   padding: var(--s3) var(--s4); font-size: var(--t-sm); border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 .note.refusal { border-left-color: var(--status-red); background: var(--ground-alt); }
+.note.ok { border-left-color: var(--status-green); background: var(--ground-alt); }
+
+/* ── spacing utilities ────────────────────────────────────────────────
+   These were inline style= attributes until CRMDEMO-EPIC1-04 drove the
+   app in a real browser and found them BLOCKED: this app's own CSP is
+   style-src 'self' with no 'unsafe-inline', which rejects style
+   ATTRIBUTES as well as <style> blocks. They had never applied, on any
+   page, since 03 — and no assertion was ever going to notice, because a
+   test runner does not enforce a Content-Security-Policy header. */
+.after { margin-top: var(--s4); }
+.lede { margin-top: var(--s2); }
+.lede-gap { margin-top: var(--s5); }
+.filters .filler { margin-left: auto; }
+
+/* ── write surfaces (04) ──────────────────────────────────────────────── */
+.actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s4) 0; }
+.entry {
+  display: flex; flex-direction: column; gap: var(--s4);
+  padding: var(--s4); background: var(--ground-alt);
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+  max-width: 42rem;
+}
+.entry .field input, .entry .field select, .entry .field textarea { width: 100%; }
+.entry .actions { margin: 0; }
+input[type="number"], textarea {
+  font: inherit; font-size: var(--t-sm); padding: var(--s2) var(--s3);
+  border: 1px solid var(--gray-300); border-radius: var(--r-sm); background: var(--ground);
+  color: var(--ink); min-width: 12rem;
+}
+textarea { resize: vertical; }
+.hint { font-size: var(--t-xs); color: var(--ink-soft); display: block; }
+.static-value { font-size: var(--t-sm); margin: 0; }
+
+/* the stage control: a select of legal moves plus a button, no script */
+.stage-move { display: flex; gap: var(--s2); align-items: center; margin-top: var(--s3); }
+.stage-move.compact { margin-top: var(--s2); }
+.stage-move.compact select {
+  min-width: 0; width: 100%; font-size: var(--t-xs); padding: var(--s1) var(--s2);
+}
+.stage-move.compact button { font-size: var(--t-xs); padding: var(--s1) var(--s2); }
+.reopen { display: flex; flex-direction: column; gap: var(--s3); margin-top: var(--s3); max-width: 34rem; }
+.reopen input { width: 100%; }
+.reopen button { align-self: flex-start; }
+
+/* ── audit trail ──────────────────────────────────────────────────────── */
+table.audit td { vertical-align: top; }
+td.nowrap, th.nowrap { white-space: nowrap; }
+
+/* visible to a screen reader, not to the page */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* ── login ────────────────────────────────────────────────────────────── */
 .login { max-width: 26rem; margin: var(--s7) auto; padding: 0 var(--s4); }
