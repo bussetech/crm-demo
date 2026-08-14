@@ -94,6 +94,38 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   reset primitives the scheduled reset job (GD-0035: nightly 04:00 ET +
   on-demand + demo-freeze) composes later.
 
+## The app plane (CRMDEMO-EPIC1-03 — of record)
+
+- **One identity, one client.** Request paths use `userClient(env, jwt)`
+  only (`src/db.ts`); there is no service-role client in the app and no
+  `SUPABASE_SERVICE_ROLE_KEY` binding in `src/env.ts`. The service plane
+  lives in `scripts/`. Keep it that way: the surest guard is an absent
+  binding.
+- **No tenant id ever comes from a request.** `src/views/model.ts` has no
+  `tenant_id` parameter anywhere; scoping is the JWT's job. Route guards
+  (`requireSession`) are wayfinding, not security.
+- **Read surfaces (v1 read-only — 04 owns writes):** `/` overview,
+  `/organizations` + `/organizations/:id`, `/people` + `/people/:id`,
+  `/deals` + `/deals/board` + `/deals/:id`, `/activities`, plus `/login`,
+  `/logout`, `/app.css` and `/healthz`.
+- **The synthetic-data banner ships in both shells** (`src/ui/layout.tsx`)
+  — signed-in and signed-out. It is not a page's choice.
+- **Deactivation is refused at sign-in**: the account authenticates, reads
+  zero membership rows, and the app declines the session and says so.
+- **The audit log is admin-eyes-only**, so a deal's stage history renders
+  for admins and renders an explicit "not yours to see" note for everyone
+  else — never a misleading empty list.
+- **No client-side JavaScript at all.** The stylesheet is a route so the
+  CSP can be `default-src 'none'; style-src 'self'` with no `unsafe-*`.
+  `Referrer-Policy` is `same-origin` **deliberately** — under
+  `no-referrer` browsers send `Origin: null` on form posts and the
+  same-origin check refuses every real sign-in (found in a real browser,
+  not in the suite).
+- **The route proof** (`test/routes.test.ts`) walks every role × every
+  route and asserts that a page served to one tenant contains no other
+  tenant's strings. It runs after the isolation proof under
+  `npm run test:isolation`, and both gate CI.
+
 ## Local development
 
 - **Port block: 5444x** (54440–54449) — recorded here per the studio's
@@ -104,10 +136,16 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
 - **Never stop or reset a Supabase stack you find running** — it is
   someone else's live session. Local stacks are per-`project_id`, not
   per-worktree.
-- `npm run dev` (wrangler), `npm run typecheck`, `npm test` (domain gates,
-  no database), `npm run db:rebuild` (reset → seed → isolation proof, the
-  one command), `npm run seed`, `npm run test:isolation` (fresh seed
-  assumed — see the data-plane section).
+- `npm run dev` (wrangler, with the running local stack's URL + anon key
+  bridged in by `scripts/dev.sh` — never the service-role key),
+  `npm run typecheck`, `npm test` (domain, view and edge gates; no
+  database), `npm run db:rebuild` (reset → seed → isolation proof → route
+  proof, the one command), `npm run seed`, `npm run test:isolation` (fresh
+  seed assumed — see the data-plane section).
+- Sign in locally as any seeded account:
+  `<user-key>@<tenant-slug>.example` / `demo-<tenant-slug>-<user-key>`
+  (e.g. `ada@wumpus-widgets.example`). Publishing them on the site is
+  05's deliberate act, not this repo's.
 
 ## Working rules
 
