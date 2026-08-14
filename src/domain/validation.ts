@@ -43,6 +43,31 @@ export const validateDealAmount = (amount: number): ValidationResult => {
 export const validateActivitySubject = (subject: string): ValidationResult =>
   trimmedLengthBetween(subject, 1, 200) ? ok : fail("subject must be 1–200 characters");
 
+/**
+ * A note body is optional and bounded. The bound is not decoration: the
+ * Worker refuses a request body over 4 KB outright (track law 3), so a
+ * form that accepted an unbounded note would answer a long one with a
+ * bare 413. The database carries the same limit as a CHECK.
+ */
+export const ACTIVITY_BODY_MAX = 2000;
+
+export const validateActivityBody = (body: string | null): ValidationResult => {
+  if (body === null || body === "") return ok; // optional
+  return body.length <= ACTIVITY_BODY_MAX
+    ? ok
+    : fail(`notes must be ${ACTIVITY_BODY_MAX} characters or fewer`);
+};
+
+const DOMAIN_SHAPE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
+
+/** Optional, and the twin of the organizations.domain CHECK. */
+export const validateOrganizationDomain = (domain: string | null): ValidationResult => {
+  if (domain === null || domain === "") return ok;
+  return DOMAIN_SHAPE.test(domain)
+    ? ok
+    : fail("domain must look like example.com — lowercase, no scheme, no path");
+};
+
 export type ActivityLinks = {
   orgId?: string | null;
   personId?: string | null;
