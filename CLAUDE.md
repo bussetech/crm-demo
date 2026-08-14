@@ -177,6 +177,63 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   (mutating, measures its own baseline). `npm run db:rebuild` is the one
   command, and a re-run wants a fresh seed.
 
+## Manager, admin and the front door (CRMDEMO-EPIC1-05 — of record)
+
+- **Three rollups, and only three** (`/reports`, manager + admin):
+  pipeline by stage with the same deals cut by owner, activity logged
+  week by week, and won/lost. The manager view is a demo beat, not a BI
+  product — a fourth report is a deferral issue, not a build.
+- **Every rendered number is a sum of rows this reader's JWT was given.**
+  There is no reporting table, no materialized total and no cache in this
+  app; `src/views/reports.ts` is pure and takes `now` as a parameter.
+  `test/routes.test.ts` reconciles the rendered stage counts and values,
+  the per-owner cut, the activity totals by kind, and the win rate back to
+  `src/seed/scenario.ts` — the seed's spec, not the report module, so the
+  chain is spec → rows → page and the code cannot merely agree with itself.
+- **The report loaders report their own completeness.** `loadDealsForReport`
+  and `loadActivityPulse` ask for an exact count alongside the rows and the
+  page says plainly when it read fewer than the database matched
+  (`REPORT_ROW_CAP`). A rollup that summed a truncated page silently would
+  be 04's `/audit` "Every write…" overclaim again.
+- **A tenant with nothing closed has NO win rate** — not 0%. A rate out of
+  an empty set is a claim about performance made from an absence of data.
+- **The /reports 403 is wayfinding, NOT a confidentiality boundary**, and
+  the page says so: every active member may read the same deals and
+  activities one at a time (that is 02's read model, deliberately), so a
+  rep could add them up by hand. What the database actually withholds is
+  another tenant's rows and this tenant's audit trail. Never describe the
+  rollups as a security boundary in copy or in a capture.
+- **The tenant-admin surface is governance, not provisioning**
+  (`/admin/users`, admin only). No account is created in v1 — self-signup
+  is disabled and the seed provisions them, and the page says that rather
+  than hiding it. The two acts are `membership_set_role` and
+  `membership_set_active` (02's RPCs, unchanged): role-checked, self-act
+  refused (the no-lockout rule), audited in the same transaction.
+  `memberships` still has no UPDATE policy and no UPDATE grant for anyone.
+- **A role select opens on a placeholder.** Defaulting to the first
+  available role made every row's one-click action "promote to tenant
+  admin" — found by looking at the rendered page, fixed in the markup and
+  pinned by a test on both the option order and the router's refusal of an
+  empty value.
+- **`/demo` is the public front door**, and its credentials are DERIVED
+  from `src/seed/scenario.ts` rather than written down — one source, two
+  consumers (the seeder provisions what the page publishes). The route
+  proof signs in with **every published credential** and asserts the
+  deactivated ones are refused: a stale credentials page is a failed demo,
+  so it is a test rather than a promise.
+- **The reset posture is a switch, not a sentence.** `RESET_POSTURE` in
+  `src/views/demo.ts` drives both the standing banner and the credentials
+  page. GD-0035 ruled the cadence (nightly 04:00 ET + on-demand + freeze),
+  but a ruling is not a running job: until the reset job ships, both
+  surfaces say the schedule is not running. **The session that ships it
+  flips `scheduled` to `true` — one edit, both surfaces** (crm-demo#18).
+- **The chart is inline SVG.** No script source in the CSP means no
+  charting library and no canvas; no `unsafe-inline` in `style-src` means
+  no width declared on the element. SVG geometry is markup and survives
+  both, the fills are classes, native `<title>` elements are the only
+  tooltip a no-JavaScript page can offer, and every number is repeated in
+  a table beneath so nothing is gated behind the picture.
+
 ## Local development
 
 - **Port block: 5444x** (54440–54449) — recorded here per the studio's
@@ -196,8 +253,13 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   section).
 - Sign in locally as any seeded account:
   `<user-key>@<tenant-slug>.example` / `demo-<tenant-slug>-<user-key>`
-  (e.g. `ada@wumpus-widgets.example`). Publishing them on the site is
-  05's deliberate act, not this repo's.
+  (e.g. `ada@wumpus-widgets.example`) — or read them off `/demo`, which
+  publishes the same list because both come from the scenario plan.
+- **`supabase db reset` can leave the API gateway holding a stale upstream
+  to the restarted auth container** — the seed then fails with
+  `listUsers: {}` and a direct call to `/auth/v1/admin/users` answers 502.
+  `docker restart supabase_kong_<project_id>` fixes it; nothing else in the
+  stack needs touching, and no other project's stack is involved.
 
 ## Working rules
 
