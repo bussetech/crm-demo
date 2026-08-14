@@ -5,11 +5,11 @@
 # repo-scoped deploy credential is the ONE GitHub-side exception
 # (ADR-0023 §3); runtime secrets live in provider-native stores.
 #
-# DELIBERATELY UNDEPLOYABLE TODAY: the gate includes the isolation proof,
-# which does not exist yet — so a dispatch fails before wrangler runs.
-# That is the stratum law working (nothing ships, deploys, or demos until
-# the proof is green), not a bug. The proof lands with the first schema
-# sessions; the deploy credential is a go-live provisioning act.
+# STILL UNDEPLOYABLE TODAY, by design: the isolation proof exists and
+# gates every dispatch (CRMDEMO-EPIC1-02), but the Cloudflare deploy
+# credential is a go-live provisioning act (CRMDEMO-EPIC1-07, the sysop's
+# clock) — a dispatch passes the gate and fails at wrangler until then.
+# Nothing ships, deploys, or demos until the proof is green (stratum law).
 name: deploy
 
 on:
@@ -46,6 +46,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: supabase start
+      # the proof asserts exact counts against the scenario baseline, so
+      # the gate seeds the runner's local stack first (never PROD from here)
+      - run: npm run seed
       - name: THE ISOLATION PROOF (launch blocker)
         run: npm run test:isolation
       - if: always()

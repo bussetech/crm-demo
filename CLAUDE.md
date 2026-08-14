@@ -59,6 +59,41 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   3. Manager view — pipeline health across the team.
   4. Tenant admin / provisioning — roles, users, tenant settings.
 
+## The data plane (CRMDEMO-EPIC1-02 — of record)
+
+- **The synthetic tenants (finalized here):**
+  1. `wumpus-widgets` — **Wumpus Widgets Ltd** (the primary demo world:
+     14 orgs, 32 people, 22 deals across every stage, activity trails +
+     spike, the audited-reopen beat).
+  2. `bandersnatch-freight` — **Bandersnatch Freight Co** (the isolation
+     beat: a full second world, zero shared rows).
+  3. `moonrise-cheeseworks` — **Moonrise Cheeseworks** (small starter
+     tenant).
+- **Demo accounts** (seed-provisioned; all emails under the reserved
+  `.example` TLD; passwords follow `demo-<tenant-slug>-<user-key>` —
+  publishing them on the site is a deliberate, contained posture,
+  ADR-0055 §3): per tenant an `admin`, a `manager`, reps, plus
+  deactivated users. **Sam Farrow (wumpus rep) is the standing pending
+  role-change** the admin scenario performs live.
+- **Single source of truth:** `src/seed/scenario.ts` — the seed runner
+  (`scripts/seed.ts`) builds from it AND the isolation proof asserts its
+  exact expected counts. Change data ⇒ both move together, by
+  construction.
+- **Seeds walk the real lifecycle:** deals are born at `lead` (trigger)
+  and transitioned step by step under the seeded users' own JWTs; the
+  audit trail is written by the triggers, never inserted directly.
+- **Stage law:** open stages move freely among themselves; `won` only
+  from `negotiation`; `lost` from any open stage; `won`/`lost` are exits
+  only via the audited `deal_reopen` RPC (manager/admin, reason
+  required). SQL and `src/domain/stages.ts` are twins — edit both.
+- **The isolation proof asserts exact counts against a FRESH seed**; its
+  own lifecycle exercises add audit rows, so re-runs want `npm run
+  db:rebuild` (reset → seed → proof, the one command). Green in CI as a
+  launch-blocker job (`isolation-proof`).
+- `crm_demo_wipe()` (service-plane-only RPC) + `scripts/seed.ts` are the
+  reset primitives the scheduled reset job (GD-0035: nightly 04:00 ET +
+  on-demand + demo-freeze) composes later.
+
 ## Local development
 
 - **Port block: 5444x** (54440–54449) — recorded here per the studio's
@@ -69,8 +104,10 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
 - **Never stop or reset a Supabase stack you find running** — it is
   someone else's live session. Local stacks are per-`project_id`, not
   per-worktree.
-- `npm run dev` (wrangler), `npm run typecheck`, `npm test`,
-  `npm run test:isolation` (once the proof exists), `npm run db:reset`.
+- `npm run dev` (wrangler), `npm run typecheck`, `npm test` (domain gates,
+  no database), `npm run db:rebuild` (reset → seed → isolation proof, the
+  one command), `npm run seed`, `npm run test:isolation` (fresh seed
+  assumed — see the data-plane section).
 
 ## Working rules
 

@@ -12,7 +12,9 @@ SaaS capability. The studio is the subject; the CRM is the canvas.
 
 - **Multi-tenant with the isolation proof as a headline exhibit** — RLS at
   the data layer, an explicit grant matrix, and a test suite that signs in
-  as every role against every tenant and asserts exact row counts.
+  as every role against every tenant and asserts exact row counts:
+  cross-tenant is zero rows, anonymous is nothing anywhere, a deactivated
+  user is a stranger everywhere. Green in CI on every push and PR.
 - **Synthetic data only**, built to four walkable demo scenarios, reset to
   baseline on a schedule. Per-role demo logins will be published on the
   site itself (signup stays disabled; accounts are seed-provisioned).
@@ -30,17 +32,19 @@ platform ADR-0055.
 
 | path | what |
 | --- | --- |
-| `src/` | the Worker (Hono app; `/healthz` is the only route so far) |
-| `supabase/` | local stack config + migrations (schema arrives by session) |
-| `test/` | vitest suites; the isolation proof lands with the schema |
-| `.github/workflows/` | project CI + studio app-CI shell + dispatch-only deploy |
+| `src/` | the Worker (Hono app; `/healthz` is the only route so far) + pure domain modules (`src/domain/`) + the scenario plan (`src/seed/`) |
+| `supabase/` | local stack config + migrations: schema with invariants → deny-by-default RLS → audited RPCs → the explicit grant matrix |
+| `scripts/` | `seed.ts` (deterministic scenario seeds — they walk the real lifecycle) + stack env-bridge helpers |
+| `test/` | pure domain gates (no database) + **THE ISOLATION PROOF** (`isolation.test.ts`) — a launch blocker, run in CI against a real local stack |
+| `.github/workflows/` | project CI (incl. the isolation-proof job) + studio app-CI shell + dispatch-only deploy |
 
 ## Build locally
 
 ```sh
 npm ci
-npm run typecheck && npm test
-supabase start   # local stack on ports 54440–54449 (see CLAUDE.md)
+npm run typecheck && npm test   # no database needed
+supabase start                  # local stack on ports 54440–54449 (see CLAUDE.md)
+npm run db:rebuild              # reset → scenario seed → THE ISOLATION PROOF
 ```
 
 No studio access needed. See `CLAUDE.md` for conventions and the detach
