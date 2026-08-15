@@ -266,6 +266,42 @@ td.nowrap, th.nowrap { white-space: nowrap; }
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
+/* ── manager reports + tenant admin (05) ──────────────────────────────── */
+.as-of { font-size: var(--t-xs); color: var(--ink-soft); margin-bottom: var(--s3); }
+.sub-head { font-size: var(--t-sm); margin: var(--s5) 0 var(--s2); }
+table.report tfoot th, table.report tfoot td {
+  border-top: 2px solid var(--hairline); border-bottom: none; font-weight: 600;
+}
+table.report tfoot th { text-transform: none; font-size: var(--t-sm); color: var(--ink); }
+.inline-form { display: flex; gap: var(--s2); align-items: center; }
+.inline-form select { min-width: 8rem; }
+td .hint { display: inline; margin-left: var(--s2); }
+
+/* the activity-volume chart: inline SVG, because this app's CSP allows no
+   script and no style attribute — geometry is markup, fills are classes */
+/* the box is capped so four columns do not drift apart across a wide
+   screen; the SVG scales UNIFORMLY inside it (no preserveAspectRatio
+   override), so a rounded bar cap stays round at every width */
+.chart { margin: var(--s4) 0; max-width: 34rem; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .bar { fill: var(--info); }
+.chart .axis { stroke: var(--hairline); stroke-width: 1; }
+.chart .tick { fill: var(--ink-soft); font-size: 11px; font-family: var(--font-sans); }
+.chart .cap {
+  fill: var(--ink); font-size: 12px; font-weight: 600; font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── the public demo-logins page ──────────────────────────────────────── */
+.prose { max-width: 52rem; }
+.prose p { margin-bottom: var(--s3); }
+.prose .facts { grid-template-columns: max-content 1fr; gap: var(--s3) var(--s5); }
+.prose .facts dt { font-weight: 600; color: var(--ink); }
+/* a credential is one string: let the table scroll rather than hyphenate an
+   address into something a visitor has to reassemble by eye */
+.prose table td.mono { white-space: nowrap; }
+.banner a { color: var(--alert-text); text-decoration: underline; white-space: nowrap; }
+
 /* ── login ────────────────────────────────────────────────────────────── */
 .login { max-width: 26rem; margin: var(--s7) auto; padding: 0 var(--s4); }
 .login h1 { font-size: var(--t-xl); letter-spacing: -0.02em; }

@@ -41,9 +41,12 @@ import { ACTIVITY_TYPES, isActivityType } from "./domain/activity";
 import {
   canCreateDeal,
   canCreateRecords,
+  canManageMemberships,
   canReadAuditLog,
+  canReadReports,
   canReopenDeal,
   canUpdateDeal,
+  isMemberRole,
   type Membership,
 } from "./domain/roles";
 import {
@@ -85,10 +88,12 @@ import {
   ReadFailed,
   boardOf,
   loadActivities,
+  loadActivityPulse,
   loadAuditFeed,
   loadDeal,
   loadDealHistory,
   loadDeals,
+  loadDealsForReport,
   loadOrg,
   loadOrgs,
   loadPeople,
@@ -97,7 +102,12 @@ import {
   rosterIndex,
   type Activity,
   type Deal,
+  type Member,
 } from "./views/model";
+import { WEEK_MS, activityByWeek } from "./views/reports";
+import { AdminUsersPage } from "./ui/admin";
+import { DemoLoginsPage } from "./ui/demo";
+import { ReportsPage } from "./ui/reports";
 import {
   createDeal,
   createOrganization,
@@ -105,6 +115,8 @@ import {
   logActivity,
   reopenDeal,
   setDealStage,
+  setMembershipActive,
+  setMembershipRole,
   updateDeal,
   updateOrganization,
   updatePerson,
@@ -263,6 +275,19 @@ app.get("/app.css", (c) =>
     "cache-control": "public, max-age=3600",
   }),
 );
+
+/**
+ * The demo logins page — public, and registered here with the other
+ * unauthenticated routes because it is the FRONT DOOR: a visitor who has
+ * not signed in yet is exactly its audience, and reading it should never
+ * cost a token verification.
+ *
+ * The credentials it publishes are derived from the seed plan rather than
+ * written down (src/views/demo.ts), so a login that works is a login this
+ * page lists, and vice versa. The route proof signs in with every one of
+ * them to keep that from being a claim.
+ */
+app.get("/demo", (c) => page(c, publicPage(c, "Demo logins", <DemoLoginsPage />)));
 
 // Everything below resolves the session first (an absent one attaches
 // nothing and falls through).
@@ -1215,6 +1240,183 @@ app.post("/activities", async (c) => {
   return activityForm(c, db, profile, "/activities", values, result.reason);
 });
 
+// ------------------------------------------------------------ reports
+//
+// The manager beat. Three rollups over this tenant's own rows, computed in
+// the Worker at page load from what the reader's JWT was given — there is
+// no reporting table, no cache and no scheduled aggregate anywhere in this
+// app, which is what lets the reconciliation spot-check trace a rendered
+// number back to a seeded one exactly.
+
+/**
+ * The activity-volume window. Four weeks, because that is the span the
+ * scenario data actually covers — a longer window is not more informative,
+ * it is a row of empty columns that reads like a business in decline. If
+ * the seed's trails ever stretch further back, widen this to match them.
+ */
+const ACTIVITY_WEEKS = 4;
+
+app.get("/reports", async (c) => {
+  const session = requireSession(c);
+  if (isResponse(session)) return session;
+  const { db, profile } = session;
+
+  // Wayfinding, and the page below says as much: the rows behind these
+  // rollups are readable by every member of the tenant, so this refusal
+  // tidies a demo rather than keeping a secret. The secrets — another
+  // tenant's rows, this tenant's audit trail — are the database's.
+  if (!canReadReports(membershipOf(profile))) {
+    return refused(
+      c,
+      profile,
+      "The rollups are a manager surface. Your role reads the same deals and activities one at a time — the pipeline, the deal list and the activity feed are all yours — but this summary is not offered to it.",
+    );
+  }
+
+  const asOf = now();
+  const [roster, deals, pulse] = await Promise.all([
+    loadRoster(db),
+    loadDealsForReport(db),
+    loadActivityPulse(db, new Date(asOf.getTime() - ACTIVITY_WEEKS * WEEK_MS).toISOString()),
+  ]);
+
+  return page(
+    c,
+    shell(
+      c,
+      profile,
+      "Reports",
+      <ReportsPage
+        tenantName={profile.tenant.name}
+        now={asOf}
+        deals={deals.rows}
+        dealsTotal={deals.total}
+        dealsComplete={deals.complete}
+        volume={activityByWeek(pulse.rows, asOf, ACTIVITY_WEEKS)}
+        activityTotal={pulse.total}
+        activityComplete={pulse.complete}
+        weeks={ACTIVITY_WEEKS}
+        roster={rosterIndex(roster)}
+      />,
+    ),
+  );
+});
+
+// ------------------------------------------------------------ tenant admin
+//
+// Governance, not provisioning: no account is created here (self-signup is
+// disabled and the seed provisions them), and the two acts that exist are
+// RPCs which check the caller's role, refuse a self-act and write their own
+// audit row. The guard below decides what is OFFERED; every one of these
+// handlers would be refused by the database if it were reached anyway.
+
+const adminPage = async (
+  c: AppContext,
+  db: AuthVars["db"],
+  profile: CrmProfile,
+  extra: { error?: string; status?: PageStatus } = {},
+): Promise<Response> => {
+  const roster = await loadRoster(db);
+  return page(
+    c,
+    shell(
+      c,
+      profile,
+      "Users",
+      <AdminUsersPage
+        members={sortedRoster(roster)}
+        selfUserId={profile.userId}
+        tenantName={profile.tenant.name}
+        flash={flashOf(c)}
+        error={extra.error}
+      />,
+    ),
+    extra.status ?? 200,
+  );
+};
+
+/** Active first, then by name — a deactivated row is a footnote, not a hole. */
+const sortedRoster = (members: Member[]): Member[] =>
+  [...members].sort(
+    (a, b) => Number(b.active) - Number(a.active) || a.displayName.localeCompare(b.displayName),
+  );
+
+/** The admin surfaces' one guard. Wayfinding; the RPCs refuse independently. */
+const adminRefusal = async (c: AppContext, profile: CrmProfile): Promise<Response | null> =>
+  canManageMemberships(membershipOf(profile))
+    ? null
+    : refused(
+        c,
+        profile,
+        "Membership administration belongs to the tenant admin. Your role can see who is on the team — every member can — but changing a role or switching an account off is an admin act, and the database refuses it to anyone else whether or not this page renders a control.",
+      );
+
+app.get("/admin/users", async (c) => {
+  const session = requireSession(c);
+  if (isResponse(session)) return session;
+  const { db, profile } = session;
+
+  const denied = await adminRefusal(c, profile);
+  if (denied) return denied;
+  return adminPage(c, db, profile);
+});
+
+app.post("/admin/users/:userId/role", async (c) => {
+  const session = requireSession(c);
+  if (isResponse(session)) return session;
+  const { db, profile } = session;
+
+  const denied = await adminRefusal(c, profile);
+  if (denied) return denied;
+
+  const userId = c.req.param("userId");
+  if (!isUuid(userId)) return notFound(c, profile);
+
+  // Vocabulary only — WHICH roles this caller may hand out, and to whom, is
+  // membership_set_role's answer, given inside the transaction that would
+  // make the change.
+  const requested = field(await c.req.formData(), "role");
+  if (!isMemberRole(requested)) {
+    return adminPage(c, db, profile, {
+      error: "That is not a role this tenant has.",
+      status: 400,
+    });
+  }
+
+  const result = await setMembershipRole(db, profile, userId, requested);
+  if (result.ok) return c.redirect("/admin/users?saved=role", 303);
+  if (result.kind === "missing") return writeRefused(c, profile);
+  return adminPage(c, db, profile, { error: result.reason, status: 400 });
+});
+
+/**
+ * Deactivate and reactivate are separate routes rather than one taking a
+ * boolean, for the reason the stage move and the reopen are separate: a
+ * mangled or crafted value must never be able to mean "switch this person
+ * off" by accident. Each route says one thing.
+ */
+const setAccess = async (c: AppContext, active: boolean): Promise<Response> => {
+  const session = requireSession(c);
+  if (isResponse(session)) return session;
+  const { db, profile } = session;
+
+  const denied = await adminRefusal(c, profile);
+  if (denied) return denied;
+
+  const userId = c.req.param("userId");
+  if (!isUuid(userId)) return notFound(c, profile);
+
+  const result = await setMembershipActive(db, profile, userId, active);
+  if (result.ok) {
+    return c.redirect(`/admin/users?saved=${active ? "activated" : "deactivated"}`, 303);
+  }
+  if (result.kind === "missing") return writeRefused(c, profile);
+  return adminPage(c, db, profile, { error: result.reason, status: 400 });
+};
+
+app.post("/admin/users/:userId/activate", (c) => setAccess(c, true));
+app.post("/admin/users/:userId/deactivate", (c) => setAccess(c, false));
+
 // ------------------------------------------------------------ audit trail
 
 /**
@@ -1317,7 +1519,13 @@ export const ROUTES = [
   "/deals/:id/reopen",
   "/activities",
   "/activities/new",
+  "/reports",
   "/audit",
+  "/admin/users",
+  "/admin/users/:userId/role",
+  "/admin/users/:userId/activate",
+  "/admin/users/:userId/deactivate",
+  "/demo",
 ] as const;
 
 export default app;

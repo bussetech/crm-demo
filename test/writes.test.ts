@@ -796,6 +796,268 @@ describe("who cannot write at all", () => {
   });
 });
 
+// ------------------------------------------------------------ tenant admin
+//
+// The admin beat (CRMDEMO-EPIC1-05). Unlike the rollups next door, this one
+// is a real boundary: `memberships` has no UPDATE policy and no UPDATE
+// grant for anybody, so the only way a role or a status moves is through an
+// RPC that checks the caller's role, refuses a self-act, and writes its own
+// audit row in the same transaction. Every refusal below is crafted past
+// the interface on purpose — a page that declines to render a control
+// proves nothing about what the database would have done.
+//
+// It leaves the world as it found it: Sam's role goes rep → manager → rep
+// (the standing pending role change, performed and undone), and Dana is
+// reactivated only long enough to prove that the door opens, then closed
+// again. Both directions are audited, which is the point.
+
+const memberState = async (userId: string): Promise<{ role: string; active: boolean }> => {
+  const { data, error } = await service
+    .from("memberships")
+    .select("role, active")
+    .eq("user_id", userId)
+    .single();
+  expect(error).toBeNull();
+  return data as { role: string; active: boolean };
+};
+
+const auditByAction = async (
+  tenantSlug: string,
+  action: string,
+): Promise<{ detail: Record<string, unknown>; actor_id: string }[]> => {
+  const { data, error } = await service
+    .from("audit_log")
+    .select("detail, actor_id")
+    .eq("tenant_id", tenantIds.get(tenantSlug)!)
+    .eq("action", action)
+    .order("id");
+  expect(error).toBeNull();
+  return (data ?? []) as { detail: Record<string, unknown>; actor_id: string }[];
+};
+
+describe("tenant administration: governance, audited, and closed to everyone else", () => {
+  it("a rep cannot change a role, and the crafted request changes nothing", async () => {
+    const before = await memberState(idOf(wumpus, "morgan"));
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "morgan")}/role`,
+      { role: "rep" },
+      cookieOf(wumpus, "riley"),
+    );
+    expect(res.status).toBe(403);
+    expect(await memberState(idOf(wumpus, "morgan"))).toEqual(before);
+  });
+
+  it("a manager cannot either — this one is admin-only", async () => {
+    const before = await memberState(idOf(wumpus, "riley"));
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "riley")}/role`,
+      { role: "manager" },
+      cookieOf(wumpus, "morgan"),
+    );
+    expect(res.status).toBe(403);
+    expect(await memberState(idOf(wumpus, "riley"))).toEqual(before);
+  });
+
+  it("the admin performs the standing role change, and the database records it", async () => {
+    const before = (await auditByAction(wumpus.slug, "membership.role_changed")).length;
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "sam")}/role`,
+      { role: "manager" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/admin/users?saved=role");
+
+    expect((await memberState(idOf(wumpus, "sam"))).role).toBe("manager");
+
+    const rows = await auditByAction(wumpus.slug, "membership.role_changed");
+    expect(rows).toHaveLength(before + 1);
+    const row = rows.at(-1)!;
+    expect(row.actor_id, "the audit row names the admin who did it").toBe(idOf(wumpus, "ada"));
+    expect(row.detail["from"]).toBe("rep");
+    expect(row.detail["to"]).toBe("manager");
+    expect(row.detail["member"]).toBe(userOf(wumpus, "sam").displayName);
+  });
+
+  it("the roster reads it back, and so does the audit trail", async () => {
+    const roster = await (await get("/admin/users", cookieOf(wumpus, "ada"))).text();
+    const samRow = roster.slice(roster.indexOf(userOf(wumpus, "sam").displayName));
+    expect(samRow.slice(0, samRow.indexOf("</tr>"))).toContain("Manager");
+
+    const audit = await (await get("/audit", cookieOf(wumpus, "ada"))).text();
+    expect(audit).toContain("Role changed — Rep → Manager");
+    expect(audit).toContain(userOf(wumpus, "ada").displayName);
+  });
+
+  it("an admin cannot change their own role, even by crafting the request", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "ada")}/role`,
+      { role: "rep" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("you cannot change your own role");
+    expect((await memberState(idOf(wumpus, "ada"))).role).toBe("admin");
+  });
+
+  it("a role outside the vocabulary is refused before the database is asked", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "riley")}/role`,
+      { role: "superuser" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("not a role this tenant has");
+  });
+
+  it("an empty role is refused too — the placeholder cannot be submitted through", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "riley")}/role`,
+      { role: "" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("another tenant's member is not this admin's to change", async () => {
+    const before = await memberState(idOf(bandersnatch, "rosa"));
+    const res = await post(
+      `/admin/users/${idOf(bandersnatch, "rosa")}/role`,
+      { role: "manager" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("no membership for that user in this tenant");
+    expect(await memberState(idOf(bandersnatch, "rosa"))).toEqual(before);
+  });
+
+  it("a change to the role someone already holds is refused with the reason", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "sam")}/role`,
+      { role: "manager" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("membership already has role");
+  });
+
+  it("and the standing change reverts, audited in the other direction", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "sam")}/role`,
+      { role: "rep" },
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(303);
+    expect((await memberState(idOf(wumpus, "sam"))).role).toBe("rep");
+    const rows = await auditByAction(wumpus.slug, "membership.role_changed");
+    expect(rows.at(-1)!.detail["to"]).toBe("rep");
+  });
+
+  it("a rep cannot switch anybody off", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "morgan")}/deactivate`,
+      {},
+      cookieOf(wumpus, "riley"),
+    );
+    expect(res.status).toBe(403);
+    expect((await memberState(idOf(wumpus, "morgan"))).active).toBe(true);
+  });
+
+  it("an admin cannot deactivate themselves — the no-lockout rule", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "ada")}/deactivate`,
+      {},
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("you cannot deactivate your own membership");
+    expect((await memberState(idOf(wumpus, "ada"))).active).toBe(true);
+  });
+
+  it("an admin restores a deactivated account, and the trail says so", async () => {
+    const dana = userOf(wumpus, "dana");
+    expect((await memberState(idOf(wumpus, "dana"))).active, "dana starts deactivated").toBe(false);
+
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "dana")}/activate`,
+      {},
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/admin/users?saved=activated");
+    expect((await memberState(idOf(wumpus, "dana"))).active).toBe(true);
+
+    const rows = await auditByAction(wumpus.slug, "membership.activated");
+    expect(rows.at(-1)!.detail["member"]).toBe(dana.displayName);
+    expect(rows.at(-1)!.actor_id).toBe(idOf(wumpus, "ada"));
+  });
+
+  it("…and the account that could not sign in a moment ago now can", async () => {
+    // the end-to-end version of the beat: the roster's switch reaches the
+    // front door, not just a column
+    const dana = userOf(wumpus, "dana");
+    const res = await post("/login", { email: dana.email, password: dana.password });
+    expect(res.status).toBe(303);
+    expect(res.headers.getSetCookie().filter((c) => /crm-access=[^;]/.test(c)).length)
+      .toBeGreaterThan(0);
+  });
+
+  it("reactivating an active membership is refused rather than quietly repeated", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "dana")}/activate`,
+      {},
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("membership is already");
+  });
+
+  it("the admin switches it back off, and the door closes at the login form", async () => {
+    const dana = userOf(wumpus, "dana");
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "dana")}/deactivate`,
+      {},
+      cookieOf(wumpus, "ada"),
+    );
+    expect(res.status).toBe(303);
+    expect((await memberState(idOf(wumpus, "dana"))).active).toBe(false);
+
+    const login = await post("/login", { email: dana.email, password: dana.password });
+    expect(login.status).toBe(401);
+    expect(await login.text()).toContain("deactivated");
+    expect(login.headers.getSetCookie().filter((c) => /crm-access=[^;]/.test(c))).toHaveLength(0);
+
+    const rows = await auditByAction(wumpus.slug, "membership.deactivated");
+    expect(rows.at(-1)!.detail["member"]).toBe(dana.displayName);
+  });
+
+  it("anonymous cannot administer anything", async () => {
+    const res = await post(`/admin/users/${idOf(wumpus, "riley")}/deactivate`, {});
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")?.startsWith("/login")).toBe(true);
+    expect((await memberState(idOf(wumpus, "riley"))).active).toBe(true);
+  });
+
+  it("and a cross-origin admin post is refused before it is read", async () => {
+    const res = await post(
+      `/admin/users/${idOf(wumpus, "riley")}/deactivate`,
+      {},
+      cookieOf(wumpus, "ada"),
+      { origin: "https://evil.example" },
+    );
+    expect(res.status).toBe(403);
+    expect((await memberState(idOf(wumpus, "riley"))).active).toBe(true);
+  });
+
+  it("leaves the tenant exactly as it found it", async () => {
+    for (const user of wumpus.users) {
+      const state = await memberState(idOf(wumpus, user.key));
+      expect(state.role, `${user.key} role drifted`).toBe(user.role);
+      expect(state.active, `${user.key} status drifted`).toBe(user.active);
+    }
+  });
+});
+
 // ------------------------------------------------------------ still isolated
 
 describe("after all of that, the tenants are still sealed", () => {
