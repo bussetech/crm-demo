@@ -9,6 +9,7 @@ import {
   INITIAL_STAGE,
   OPEN_STAGES,
   advancePath,
+  allowedTransitions,
   isOpenStage,
   isTerminalStage,
   isTransitionAllowed,
@@ -24,12 +25,16 @@ import {
   type Membership,
 } from "../src/domain/roles";
 import {
+  ACTIVITY_BODY_MAX,
+  validateActivityBody,
   validateActivityLinks,
   validateDealAmount,
   validateEmail,
+  validateOrganizationDomain,
   validateOrganizationName,
   validateReopenReason,
 } from "../src/domain/validation";
+import { ACTIVITY_TYPES, isActivityType } from "../src/domain/activity";
 import { auditRowsForDeal, buildScenario, dealWalk } from "../src/seed/scenario";
 
 const admin: Membership = { role: "admin", active: true };
@@ -259,8 +264,83 @@ describe("the scenario plan (seed = spec)", () => {
     expect(
       auditRowsForDeal({ ...wumpus.deals[0]!, targetStage: "lost", lostFrom: "negotiation" }),
     ).toBe(4);
-    expect(wumpus.expected.auditRows).toBe(
-      wumpus.deals.reduce((sum, d) => sum + auditRowsForDeal(d), 0),
-    );
+    // ...and since CRMDEMO-EPIC1-04 the trail also carries one row per
+    // record created, which is what makes "the audit trail shows every
+    // step" a true sentence about the day-in-the-life walk.
+    const walk = wumpus.deals.reduce((sum, d) => sum + auditRowsForDeal(d), 0);
+    const created =
+      wumpus.orgs.length +
+      wumpus.people.length +
+      wumpus.deals.length +
+      wumpus.activities.length;
+    expect(wumpus.expected.auditRows).toBe(walk + created);
+  });
+});
+
+describe("the moves a stage control may offer", () => {
+  it("offers every legal move and only legal moves, at every stage", () => {
+    for (const from of DEAL_STAGES) {
+      const offered = allowedTransitions(from);
+      for (const to of DEAL_STAGES) {
+        expect(
+          offered.includes(to),
+          `${from} -> ${to} offered but ${isTransitionAllowed(from, to) ? "legal" : "illegal"}`,
+        ).toBe(isTransitionAllowed(from, to));
+      }
+    }
+  });
+
+  it("never offers a move out of a closed deal — the reopen RPC is the only exit", () => {
+    for (const stage of DEAL_STAGES.filter(isTerminalStage)) {
+      expect(allowedTransitions(stage)).toEqual([]);
+      expect(allowedTransitions(stage, { reopen: true })).toEqual(["negotiation"]);
+    }
+  });
+
+  it("lets an open deal close either way, and won only from negotiation", () => {
+    expect(allowedTransitions("negotiation")).toContain("won");
+    for (const stage of OPEN_STAGES) {
+      expect(allowedTransitions(stage)).toContain("lost");
+      if (stage !== "negotiation") expect(allowedTransitions(stage)).not.toContain("won");
+    }
+  });
+
+  it("never offers a deal its own stage", () => {
+    for (const stage of DEAL_STAGES) expect(allowedTransitions(stage)).not.toContain(stage);
+  });
+});
+
+describe("the write-form validators (04)", () => {
+  it("treats a note body as optional and bounded", () => {
+    expect(validateActivityBody(null).ok).toBe(true);
+    expect(validateActivityBody("").ok).toBe(true);
+    expect(validateActivityBody("x".repeat(ACTIVITY_BODY_MAX)).ok).toBe(true);
+    expect(validateActivityBody("x".repeat(ACTIVITY_BODY_MAX + 1)).ok).toBe(false);
+  });
+
+  it("keeps the body bound under the Worker's 4 KB request cap", () => {
+    // if these ever cross, a long note becomes a bare 413 instead of a
+    // friendly message — the reason the bound exists at all
+    expect(ACTIVITY_BODY_MAX).toBeLessThan(4096);
+  });
+
+  it("accepts a bare domain and refuses a URL", () => {
+    expect(validateOrganizationDomain(null).ok).toBe(true);
+    expect(validateOrganizationDomain("gizmo-garden-supply.example").ok).toBe(true);
+    expect(validateOrganizationDomain("https://gizmo.example/path").ok).toBe(false);
+    expect(validateOrganizationDomain("Gizmo.Example").ok).toBe(false);
+    expect(validateOrganizationDomain("nodot").ok).toBe(false);
+  });
+});
+
+describe("the activity vocabulary twins the SQL enum", () => {
+  it("knows exactly the four kinds", () => {
+    expect([...ACTIVITY_TYPES]).toEqual(["call", "email", "meeting", "note"]);
+  });
+
+  it("refuses anything else, so a crafted type never reaches the database", () => {
+    expect(isActivityType("call")).toBe(true);
+    expect(isActivityType("carrier-pigeon")).toBe(false);
+    expect(isActivityType("")).toBe(false);
   });
 });

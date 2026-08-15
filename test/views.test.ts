@@ -5,8 +5,17 @@
 import { describe, expect, it } from "vitest";
 
 import { boardOf, searchTerm, type Deal } from "../src/views/model";
-import { STAGE_LABEL, auditLine, day, money, since, stamp } from "../src/views/format";
-import { currentNav } from "../src/ui/layout";
+import {
+  STAGE_LABEL,
+  auditHref,
+  auditLine,
+  auditTarget,
+  day,
+  money,
+  since,
+  stamp,
+} from "../src/views/format";
+import { FLASH, currentNav } from "../src/ui/layout";
 import { DEAL_STAGES } from "../src/domain/stages";
 
 const deal = (id: string, stage: Deal["stage"], amount: number): Deal => ({
@@ -90,7 +99,41 @@ describe("formatting is fixed, so a capture does not drift", () => {
     expect(auditLine("deal.reopened", { reason: "customer came back" })).toBe(
       "Reopened — customer came back",
     );
-    expect(auditLine("membership.role_changed", {})).toBe("membership.role_changed");
+  });
+
+  it("reads back the record writes 04 added to the vocabulary", () => {
+    expect(auditLine("deal.created", { stage: "lead" })).toBe("Deal created at Lead");
+    expect(auditLine("deal.updated", { changed: ["amount", "owner"] })).toBe(
+      "Deal edited — amount, owner",
+    );
+    expect(auditLine("organization.created", {})).toBe("Organization added");
+    expect(auditLine("person.updated", { changed: ["email"] })).toBe("Person edited — email");
+    expect(auditLine("activity.logged", { type: "call" })).toBe("Call logged");
+    expect(auditLine("membership.role_changed", { from: "rep", to: "manager" })).toBe(
+      "Role changed — Rep → Manager",
+    );
+  });
+
+  it("degrades to something readable rather than dropping a row it cannot phrase", () => {
+    // a trail that silently omits rows is worse than a plain one
+    expect(auditLine("membership.role_changed", {})).toBe("Role changed");
+    expect(auditLine("something.new", {})).toBe("something.new");
+  });
+
+  it("names the record an audit row is about, from the row itself", () => {
+    expect(auditTarget({ deal_name: "Widget Refresh Q3" })).toBe("Widget Refresh Q3");
+    expect(auditTarget({ name: "Gizmo Garden Supply" })).toBe("Gizmo Garden Supply");
+    expect(auditTarget({ subject: "Discovery call" })).toBe("Discovery call");
+    expect(auditTarget({})).toBeNull();
+  });
+
+  it("links an audit row only where a reader has a page to open", () => {
+    expect(auditHref("deal", "abc")).toBe("/deals/abc");
+    expect(auditHref("organization", "abc")).toBe("/organizations/abc");
+    expect(auditHref("person", "abc")).toBe("/people/abc");
+    expect(auditHref("activity", "abc")).toBeNull();
+    expect(auditHref("membership", "abc")).toBeNull();
+    expect(auditHref("deal", null)).toBeNull();
   });
 
   it("labels every stage the domain knows", () => {
@@ -110,5 +153,26 @@ describe("wayfinding", () => {
   it("prefers the longest match, so the board is not filed under deals", () => {
     expect(currentNav("/deals/board")).toBe("/deals/board");
     expect(currentNav("/deals/some-id")).toBe("/deals");
+  });
+
+  it("files the write surfaces under the section they write to", () => {
+    expect(currentNav("/organizations/new")).toBe("/organizations");
+    expect(currentNav("/people/abc/edit")).toBe("/people");
+    expect(currentNav("/activities/new")).toBe("/activities");
+    expect(currentNav("/audit")).toBe("/audit");
+  });
+});
+
+describe("the post-write confirmation", () => {
+  it("is looked up by key, so nothing a visitor types can reach the page", () => {
+    expect(FLASH["created"]).toBeTruthy();
+    expect(FLASH["<script>alert(1)</script>"]).toBeUndefined();
+  });
+
+  it("has a message for every code the router redirects with", () => {
+    // the router's vocabulary — keep in step with src/index.tsx
+    for (const code of ["created", "updated", "stage", "reopened", "logged"]) {
+      expect(FLASH[code], `no confirmation for ?saved=${code}`).toBeTruthy();
+    }
   });
 });

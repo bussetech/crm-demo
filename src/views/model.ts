@@ -70,6 +70,8 @@ export type AuditEntry = {
   id: number;
   action: string;
   actorId: string | null;
+  entityType: string;
+  entityId: string | null;
   detail: Record<string, unknown>;
   createdAt: string;
 };
@@ -303,32 +305,63 @@ export async function loadActivities(
 
 // ------------------------------------------------------------ audit trail
 
+const AUDIT_COLUMNS = "id, action, actor_id, entity_type, entity_id, detail, created_at";
+
+type AuditRow = {
+  id: number;
+  action: string;
+  actor_id: string | null;
+  entity_type: string;
+  entity_id: string | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+};
+
+const asAudit = (r: AuditRow): AuditEntry => ({
+  id: r.id,
+  action: r.action,
+  actorId: r.actor_id,
+  entityType: r.entity_type,
+  entityId: r.entity_id,
+  detail: r.detail ?? {},
+  createdAt: r.created_at,
+});
+
 /**
- * A deal's stage history comes from the audit rows the transition trigger
- * wrote. The audit log is admin-eyes-only by policy, so a rep or manager
- * reads ZERO rows here — which the deal page states plainly rather than
- * rendering as "no history".
+ * A deal's own history — created, edited, moved, reopened — from the audit
+ * rows the triggers wrote. The audit log is admin-eyes-only by policy, so
+ * a rep or manager reads ZERO rows here, which the deal page states
+ * plainly rather than rendering as "no history".
  */
 export async function loadDealHistory(db: SupabaseClient, dealId: string): Promise<AuditEntry[]> {
   const { data, error } = await db
     .from("audit_log")
-    .select("id, action, actor_id, detail, created_at")
+    .select(AUDIT_COLUMNS)
     .eq("entity_id", dealId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
-  return rows<{
-    id: number;
-    action: string;
-    actor_id: string | null;
-    detail: Record<string, unknown>;
-    created_at: string;
-  }>(data, error, "deal history").map((r) => ({
-    id: r.id,
-    action: r.action,
-    actorId: r.actor_id,
-    detail: r.detail ?? {},
-    createdAt: r.created_at,
-  }));
+  return rows<AuditRow>(data, error, "deal history").map(asAudit);
+}
+
+/**
+ * The tenant's audit trail, newest first — every write the database
+ * recorded, by whom, when. Same policy as above: an admin reads their own
+ * tenant's rows and a non-admin reads none, so this loader needs no role
+ * check of its own. The caller consults `canReadAuditLog` to decide what
+ * to SAY about an empty result, never to decide whether to ask.
+ */
+export async function loadAuditFeed(
+  db: SupabaseClient,
+  opts: { action?: string; actorId?: string; limit?: number } = {},
+): Promise<AuditEntry[]> {
+  let query = db.from("audit_log").select(AUDIT_COLUMNS);
+  if (opts.action) query = query.eq("action", opts.action);
+  if (opts.actorId) query = query.eq("actor_id", opts.actorId);
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(opts.limit ?? 100);
+  return rows<AuditRow>(data, error, "audit trail").map(asAudit);
 }
 
 // ------------------------------------------------------------ helpers

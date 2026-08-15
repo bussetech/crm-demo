@@ -7,17 +7,27 @@
 import type { Child } from "hono/jsx";
 
 import type { CrmProfile } from "../env";
-import type { MemberRole } from "../domain/roles";
+import { canReadAuditLog } from "../domain/roles";
+import { ROLE_LABEL } from "../views/format";
+
+export { ROLE_LABEL };
 
 export const BANNER_TEXT = "Demo environment — synthetic data, resets on schedule.";
 
+/**
+ * `adminOnly` is an AFFORDANCE flag, not a gate: /audit is reachable by
+ * anyone signed in, and reads zero rows for anyone who is not an admin
+ * because the policy says so. Hiding the link keeps a demo tidy; it is not
+ * what keeps the trail private.
+ */
 const NAV = [
-  { href: "/", label: "Overview" },
-  { href: "/organizations", label: "Organizations" },
-  { href: "/people", label: "People" },
-  { href: "/deals", label: "Deals" },
-  { href: "/deals/board", label: "Pipeline" },
-  { href: "/activities", label: "Activity" },
+  { href: "/", label: "Overview", adminOnly: false },
+  { href: "/organizations", label: "Organizations", adminOnly: false },
+  { href: "/people", label: "People", adminOnly: false },
+  { href: "/deals", label: "Deals", adminOnly: false },
+  { href: "/deals/board", label: "Pipeline", adminOnly: false },
+  { href: "/activities", label: "Activity", adminOnly: false },
+  { href: "/audit", label: "Audit trail", adminOnly: true },
 ] as const;
 
 /** The nav item a path belongs to — longest matching prefix, "/" exact. */
@@ -67,12 +77,6 @@ function Footer({ buildId }: { buildId: string }) {
   );
 }
 
-export const ROLE_LABEL: Record<MemberRole, string> = {
-  admin: "Tenant admin",
-  manager: "Manager",
-  rep: "Rep",
-};
-
 export function Shell(props: {
   title: string;
   profile: CrmProfile;
@@ -81,6 +85,8 @@ export function Shell(props: {
   children?: Child;
 }) {
   const active = currentNav(props.path);
+  const seesAudit = canReadAuditLog({ role: props.profile.membership.role, active: true });
+  const items = NAV.filter((item) => !item.adminOnly || seesAudit);
   return (
     <html lang="en">
       <Head title={props.title} />
@@ -110,7 +116,7 @@ export function Shell(props: {
         </div>
         <nav class="nav" aria-label="Sections">
           <div class="nav-inner">
-            {NAV.map((item) => (
+            {items.map((item) => (
               <a href={item.href} aria-current={item.href === active ? "page" : undefined}>
                 {item.label}
               </a>
@@ -149,4 +155,42 @@ export function PageHead(props: { title: string; sub?: string; children?: Child 
 
 export function Empty({ what }: { what: string }) {
   return <p class="empty">No {what}.</p>;
+}
+
+/** A row of buttons/links that start a write. */
+export function Actions({ children }: { children?: Child }) {
+  return <div class="actions">{children}</div>;
+}
+
+export function Notice({ tone, children }: { tone: "ok" | "refusal"; children?: Child }) {
+  return (
+    <p
+      class={tone === "refusal" ? "note refusal" : "note ok"}
+      role={tone === "refusal" ? "alert" : "status"}
+    >
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Confirmation after a write, carried in the redirect's query string.
+ *
+ * A flash needs somewhere to live between the POST and the GET that
+ * follows it. This app has no session store and ships no JavaScript, so
+ * the redirect target says what happened — and because the message is
+ * looked up by key rather than echoed, nothing a visitor types can reach
+ * the page this way.
+ */
+export const FLASH: Record<string, string> = {
+  created: "Created. The audit trail has it.",
+  updated: "Saved. The audit trail has it.",
+  stage: "Stage updated — the database recorded the move.",
+  reopened: "Reopened. The reason is in the audit trail, against your name.",
+  logged: "Activity logged.",
+};
+
+export function Flash({ code }: { code?: string }) {
+  const message = code ? FLASH[code] : undefined;
+  return message ? <Notice tone="ok">{message}</Notice> : null;
 }

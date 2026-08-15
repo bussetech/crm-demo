@@ -162,7 +162,12 @@ const LADDER: DealStage[] = ["lead", "qualified", "proposal", "negotiation"];
 
 const stageIndex = (stage: DealStage): number => LADDER.indexOf(stage);
 
-/** audit rows a deal's lifecycle walk writes (stage_changed + reopened) */
+/**
+ * Audit rows a deal's LIFECYCLE WALK writes — stage_changed per move, plus
+ * the reopened row for the audited beat. Its creation is counted
+ * separately (every record creation is audited since CRMDEMO-EPIC1-04);
+ * this function is only about the walk.
+ */
 export const auditRowsForDeal = (deal: SeedDeal): number => {
   if (deal.targetStage === "lost") return stageIndex(deal.lostFrom ?? "lead") + 1;
   if (deal.targetStage === "won") return deal.reopened ? 7 : 4;
@@ -310,6 +315,13 @@ const buildTenant = (spec: TenantSpec): TenantPlan => {
     ),
   ) as Record<DealStage, number>;
 
+  // Since CRMDEMO-EPIC1-04 the database audits ordinary record writes too
+  // (migration 20260814120005), so a seeded tenant's audit trail is one row
+  // per record created PLUS the stage walk. Memberships are provisioned by
+  // the service role rather than administered, and carry no audit row.
+  const creationRows = orgs.length + people.length + deals.length + activities.length;
+  const walkRows = deals.reduce((sum, d) => sum + auditRowsForDeal(d), 0);
+
   return {
     slug: spec.slug,
     name: spec.name,
@@ -324,7 +336,7 @@ const buildTenant = (spec: TenantSpec): TenantPlan => {
       deals: deals.length,
       activities: activities.length,
       memberships: users.length,
-      auditRows: deals.reduce((sum, d) => sum + auditRowsForDeal(d), 0),
+      auditRows: creationRows + walkRows,
       dealsByStage,
     },
   };

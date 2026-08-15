@@ -5,6 +5,7 @@
 
 import type { Child } from "hono/jsx";
 
+import { ACTIVITY_TYPES } from "../domain/activity";
 import { DEAL_STAGES, type DealStage } from "../domain/stages";
 import type { MemberRole } from "../domain/roles";
 import type {
@@ -17,7 +18,8 @@ import type {
   BoardColumn,
 } from "../views/model";
 import { ACTIVITY_LABEL, STAGE_LABEL, auditLine, day, fullName, money, since, stamp } from "../views/format";
-import { Empty, PageHead, ROLE_LABEL } from "./layout";
+import { Actions, Empty, Flash, PageHead, ROLE_LABEL } from "./layout";
+import { ReopenControl, StageClosed, StageControl } from "./forms";
 
 type Roster = Map<string, Member>;
 
@@ -67,13 +69,13 @@ export function LoginPage(props: { error?: string; next?: string; email?: string
   return (
     <div class="login">
       <h1>Sign in to CRM Demo</h1>
-      <p class="muted" style="margin-top:.5rem">
+      <p class="muted lede">
         Accounts on this demo are provisioned with the scenario data — there is no sign-up,
         and no account here belongs to a real person. The published demo logins are listed
         on the studio site.
       </p>
       {props.error ? (
-        <p class="note refusal" style="margin-top:1.5rem" role="alert">
+        <p class="note refusal lede-gap" role="alert">
           {props.error}
         </p>
       ) : null}
@@ -178,7 +180,7 @@ export function OverviewPage(props: {
 
       <Section title="Recent activity">
         <ActivityFeed activities={props.activities} roster={props.roster} now={props.now} />
-        <p style="margin-top:1rem">
+        <p class="after">
           <a href="/activities">All activity →</a>
         </p>
       </Section>
@@ -188,10 +190,22 @@ export function OverviewPage(props: {
 
 // ------------------------------------------------------------ organizations
 
-export function OrgListPage(props: { orgs: Org[]; q: string; sort: string }) {
+export function OrgListPage(props: {
+  orgs: Org[];
+  q: string;
+  sort: string;
+  canCreate: boolean;
+}) {
   return (
     <>
       <PageHead title="Organizations" sub={`${props.orgs.length} shown`} />
+      {props.canCreate ? (
+        <Actions>
+          <a class="button" href="/organizations/new">
+            New organization
+          </a>
+        </Actions>
+      ) : null}
       <form class="filters" method="get" action="/organizations">
         <div class="field">
           <label for="q">Search by name</label>
@@ -259,6 +273,9 @@ export function OrgDetailPage(props: {
   activities: Activity[];
   roster: Roster;
   now: Date;
+  canWrite: boolean;
+  canCreateDeal: boolean;
+  flash?: string;
 }) {
   return (
     <>
@@ -266,6 +283,25 @@ export function OrgDetailPage(props: {
         <a href="/organizations">← Organizations</a>
       </p>
       <PageHead title={props.org.name} />
+      <Flash code={props.flash} />
+      {props.canWrite ? (
+        <Actions>
+          <a class="button" href={`/organizations/${props.org.id}/edit`}>
+            Edit
+          </a>
+          <a class="button" href={`/people/new?org=${props.org.id}`}>
+            Add contact
+          </a>
+          {props.canCreateDeal ? (
+            <a class="button" href={`/deals/new?org=${props.org.id}`}>
+              New deal
+            </a>
+          ) : null}
+          <a class="button" href={`/activities/new?org=${props.org.id}`}>
+            Log activity
+          </a>
+        </Actions>
+      ) : null}
       <div class="panel">
         <Facts>
           <Fact label="Industry">{props.org.industry ?? "—"}</Fact>
@@ -335,10 +371,17 @@ export function PeopleTable({ people, showOrg }: { people: Person[]; showOrg: bo
   );
 }
 
-export function PeopleListPage(props: { people: Person[]; q: string }) {
+export function PeopleListPage(props: { people: Person[]; q: string; canCreate: boolean }) {
   return (
     <>
       <PageHead title="People" sub={`${props.people.length} shown`} />
+      {props.canCreate ? (
+        <Actions>
+          <a class="button" href="/people/new">
+            New contact
+          </a>
+        </Actions>
+      ) : null}
       <form class="filters" method="get" action="/people">
         <div class="field">
           <label for="q">Search by name or email</label>
@@ -365,6 +408,8 @@ export function PersonDetailPage(props: {
   activities: Activity[];
   roster: Roster;
   now: Date;
+  canWrite: boolean;
+  flash?: string;
 }) {
   const p = props.person;
   return (
@@ -373,6 +418,17 @@ export function PersonDetailPage(props: {
         <a href="/people">← People</a>
       </p>
       <PageHead title={fullName(p)} sub={p.title ?? undefined} />
+      <Flash code={props.flash} />
+      {props.canWrite ? (
+        <Actions>
+          <a class="button" href={`/people/${p.id}/edit`}>
+            Edit
+          </a>
+          <a class="button" href={`/activities/new?person=${p.id}`}>
+            Log activity
+          </a>
+        </Actions>
+      ) : null}
       <div class="panel">
         <Facts>
           <Fact label="Organization">
@@ -439,11 +495,19 @@ export function DealListPage(props: {
   roster: Roster;
   stage: string;
   ownerId: string;
+  canCreate: boolean;
 }) {
   const owners = [...props.roster.values()].filter((m) => m.active);
   return (
     <>
       <PageHead title="Deals" sub={`${props.deals.length} shown`} />
+      {props.canCreate ? (
+        <Actions>
+          <a class="button" href="/deals/new">
+            New deal
+          </a>
+        </Actions>
+      ) : null}
       <form class="filters" method="get" action="/deals">
         <div class="field">
           <label for="stage">Stage</label>
@@ -473,7 +537,7 @@ export function DealListPage(props: {
             Clear
           </a>
         ) : null}
-        <span style="margin-left:auto">
+        <span class="filler">
           <a href="/deals/board">Pipeline board →</a>
         </span>
       </form>
@@ -486,7 +550,19 @@ export function DealListPage(props: {
   );
 }
 
-export function BoardPage(props: { columns: BoardColumn[]; roster: Roster }) {
+export function BoardPage(props: {
+  columns: BoardColumn[];
+  roster: Roster;
+  /**
+   * deal id → the legal moves this reader may make on it. Absent means no
+   * control: either the stage has no ordinary exit, or this deal is not
+   * theirs to move. The page does not work out which — the router asked
+   * the domain modules, and the database will refuse either way.
+   */
+  moves: Map<string, DealStage[]>;
+  canCreate: boolean;
+  flash?: string;
+}) {
   const total = props.columns.reduce((sum, col) => sum + col.deals.length, 0);
   return (
     <>
@@ -494,6 +570,14 @@ export function BoardPage(props: { columns: BoardColumn[]; roster: Roster }) {
         title="Pipeline"
         sub={`${total} deals across every stage — including the closed ones, so the board shows the pipeline that exists rather than a flattering slice of it.`}
       />
+      <Flash code={props.flash} />
+      {props.canCreate ? (
+        <Actions>
+          <a class="button" href="/deals/new">
+            New deal
+          </a>
+        </Actions>
+      ) : null}
       <div class="board">
         {props.columns.map((col) => (
           <div class={`column ${col.stage}`}>
@@ -517,6 +601,7 @@ export function BoardPage(props: { columns: BoardColumn[]; roster: Roster }) {
                       <span class="amt num">{money(d.amount)}</span> ·{" "}
                       {memberName(props.roster, d.ownerId)}
                     </span>
+                    <StageControl deal={d} moves={props.moves.get(d.id) ?? []} compact={true} />
                   </div>
                 ))}
               </div>
@@ -535,6 +620,14 @@ export function DealDetailPage(props: {
   activities: Activity[];
   roster: Roster;
   now: Date;
+  /** `allowedTransitions` for this deal, empty when it is not this reader's to move */
+  moves: DealStage[];
+  canEdit: boolean;
+  canReopen: boolean;
+  /** the deal sits at a terminal stage — the only exit is the audited reopen */
+  closed: boolean;
+  flash?: string;
+  error?: string;
 }) {
   const d = props.deal;
   return (
@@ -543,6 +636,22 @@ export function DealDetailPage(props: {
         <a href="/deals">← Deals</a> · <a href="/deals/board">Pipeline</a>
       </p>
       <PageHead title={d.name} />
+      <Flash code={props.flash} />
+      {props.error ? (
+        <p class="note refusal" role="alert">
+          {props.error}
+        </p>
+      ) : null}
+      {props.canEdit ? (
+        <Actions>
+          <a class="button" href={`/deals/${d.id}/edit`}>
+            Edit
+          </a>
+          <a class="button" href={`/activities/new?deal=${d.id}`}>
+            Log activity
+          </a>
+        </Actions>
+      ) : null}
       <div class="panel">
         <Facts>
           <Fact label="Organization">
@@ -560,10 +669,33 @@ export function DealDetailPage(props: {
         </Facts>
       </div>
 
-      <Section title="Stage history">
+      <Section title="Move this deal">
+        {props.closed ? (
+          <>
+            <StageClosed stage={d.stage} canReopen={props.canReopen} />
+            {props.canReopen ? <ReopenControl deal={d} /> : null}
+          </>
+        ) : props.moves.length > 0 ? (
+          <>
+            <p class="muted">
+              Only legal moves are offered. The database enforces the same rule on any request,
+              including one that never came from this form.
+            </p>
+            <StageControl deal={d} moves={props.moves} />
+          </>
+        ) : (
+          <p class="note">
+            This deal belongs to another member's book. Reps work their own deals; managers and
+            tenant admins work any — and the row-level policy, not this page, is what declines
+            the write.
+          </p>
+        )}
+      </Section>
+
+      <Section title="Deal history">
         {props.historyVisible ? (
           props.history.length === 0 ? (
-            <Empty what="recorded stage changes yet" />
+            <Empty what="recorded changes yet" />
           ) : (
             <ul class="trail">
               {props.history.map((h) => (
@@ -578,7 +710,7 @@ export function DealDetailPage(props: {
           )
         ) : (
           <p class="note">
-            Stage history comes from the audit log, which this demo shows to tenant admins
+            The deal's history comes from the audit log, which this demo shows to tenant admins
             only. Your role can see the deal and its current stage, not the audit trail —
             that limit is enforced by the database, not by this page.
           </p>
@@ -637,17 +769,27 @@ export function ActivityPage(props: {
   type: string;
   authorId: string;
   now: Date;
+  canCreate: boolean;
+  flash?: string;
 }) {
   const authors = [...props.roster.values()];
   return (
     <>
       <PageHead title="Activity" sub={`${props.activities.length} most recent, newest first`} />
+      <Flash code={props.flash} />
+      {props.canCreate ? (
+        <Actions>
+          <a class="button" href="/activities/new">
+            Log activity
+          </a>
+        </Actions>
+      ) : null}
       <form class="filters" method="get" action="/activities">
         <div class="field">
           <label for="type">Type</label>
           <select id="type" name="type">
             <option value="">All types</option>
-            {["call", "email", "meeting", "note"].map((t) => (
+            {ACTIVITY_TYPES.map((t) => (
               <option value={t} selected={props.type === t}>
                 {ACTIVITY_LABEL[t]}
               </option>
@@ -693,12 +835,50 @@ export function NotFoundPage() {
   );
 }
 
+/**
+ * A write that changed nothing. Deliberately covers all three reasons at
+ * once and commits to none: saying which would tell a visitor whether a
+ * record they cannot touch exists.
+ */
+export function WriteRefusedPage() {
+  return (
+    <>
+      <PageHead
+        title="Nothing changed"
+        sub="The database declined this write and no row moved."
+      />
+      <p>
+        That record is not there to change from where you are signed in — it may have been
+        removed, it may belong to another member's book, or it may belong to another tenant
+        entirely. This app does not say which, for the same reason it does not distinguish
+        &ldquo;does not exist&rdquo; from &ldquo;not yours&rdquo; when you read.
+      </p>
+      <p class="after">
+        <a href="/">Back to the overview</a>
+      </p>
+    </>
+  );
+}
+
+/** A form this reader's role does not get. Not an oracle — see the router. */
+export function RefusedPage({ detail }: { detail: string }) {
+  return (
+    <>
+      <PageHead title="Not yours to change" />
+      <p class="note refusal">{detail}</p>
+      <p class="after">
+        <a href="/">Back to the overview</a>
+      </p>
+    </>
+  );
+}
+
 export function ErrorPage({ detail }: { detail: string }) {
   return (
     <>
       <PageHead title="Something went wrong" />
       <p class="note refusal">{detail}</p>
-      <p style="margin-top:1rem">
+      <p class="after">
         <a href="/">Back to the overview</a>
       </p>
     </>

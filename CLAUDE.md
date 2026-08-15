@@ -88,8 +88,8 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   required). SQL and `src/domain/stages.ts` are twins — edit both.
 - **The isolation proof asserts exact counts against a FRESH seed**; its
   own lifecycle exercises add audit rows, so re-runs want `npm run
-  db:rebuild` (reset → seed → proof, the one command). Green in CI as a
-  launch-blocker job (`isolation-proof`).
+  db:rebuild` (reset → seed → the three proofs, the one command). Green
+  in CI as a launch-blocker job (`isolation-proof`).
 - `crm_demo_wipe()` (service-plane-only RPC) + `scripts/seed.ts` are the
   reset primitives the scheduled reset job (GD-0035: nightly 04:00 ET +
   on-demand + demo-freeze) composes later.
@@ -126,6 +126,57 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   tenant's strings. It runs after the isolation proof under
   `npm run test:isolation`, and both gate CI.
 
+## The write plane (CRMDEMO-EPIC1-04 — of record)
+
+- **Writes run as the user, like reads.** `src/views/writes.ts` is the only
+  place a row is created or changed, and every mutation goes through
+  `userClient`. There is still no service-role client in a request path
+  and no binding one could be built from.
+- **`tenant_id` on an insert comes from `profile.tenant.id`** — a value
+  read through the user's own JWT at sign-in, never from a form. RLS's
+  WITH CHECK re-agrees on every insert. `test/source.test.ts` asserts that
+  every `tenant_id:` in the write model is exactly that expression, and
+  that the router never mentions the column at all.
+- **No business rule is written in the router or the write model.** Stage
+  legality is `src/domain/stages.ts`, capability is `src/domain/roles.ts`,
+  input shape is `src/domain/validation.ts`, the activity vocabulary is
+  `src/domain/activity.ts`. A grep test enforces it: neither file may
+  contain a role name or a stage name as a quoted literal.
+- **A stage move is handed to the database unjudged.** `allowedTransitions`
+  decides what the control OFFERS; `setDealStage` asks without checking, so
+  a crafted request meets the trigger's refusal (`illegal stage
+  transition`) exactly as a mis-rendered form would. The write proof pins
+  this both ways.
+- **Three refusal shapes, and they mean different things:** `invalid` (the
+  domain module, friendly, re-renders the form with the input kept, 400);
+  `refused` (the database spoke — deliberate `raise exception` messages are
+  shown verbatim, anything else becomes a generic line and the detail goes
+  to the log, 400); `missing` (zero rows — not yours, gone, or another
+  tenant's, and the app does not say which, 404). A form a role may not
+  use is a 403 that leaks nothing, because the reader can already see the
+  record.
+- **Every write is audited by the database** (migration
+  `20260814120005_write_audit.sql`): creates and edits of organizations,
+  people, deals and activities join 02's stage/membership vocabulary.
+  Triggers write them — `audit_log` still has no insert policy and no
+  insert grant for anyone. **Accumulated-vocab law:** any migration that
+  re-declares `audit_log_action_check` restates the FULL list.
+- **`/audit` is the tenant audit trail**, admin-eyes-only by policy. The
+  query RUNS FOR EVERY READER and returns zero rows to non-admins — that
+  is deliberate, so the page can honestly say it asked the database with
+  your sign-in and was declined. Same for a deal's own history. The page
+  names its row cap rather than claiming completeness (crm-demo#15).
+- **Never write a `style=` attribute.** This app's CSP is
+  `style-src 'self'` with no `unsafe-inline`, which rejects style
+  ATTRIBUTES as well as `<style>` blocks — every inline style shipped in 03
+  had been silently dropped in real browsers and no assertion could see it
+  (a test runner does not enforce a CSP). Use a class;
+  `test/source.test.ts` and the route proof both check.
+- **`npm run test:isolation` now means THREE proofs**, in order: isolation
+  (row level, exact counts) → routes (rendered page, read-only) → writes
+  (mutating, measures its own baseline). `npm run db:rebuild` is the one
+  command, and a re-run wants a fresh seed.
+
 ## Local development
 
 - **Port block: 5444x** (54440–54449) — recorded here per the studio's
@@ -138,10 +189,11 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   per-worktree.
 - `npm run dev` (wrangler, with the running local stack's URL + anon key
   bridged in by `scripts/dev.sh` — never the service-role key),
-  `npm run typecheck`, `npm test` (domain, view and edge gates; no
-  database), `npm run db:rebuild` (reset → seed → isolation proof → route
-  proof, the one command), `npm run seed`, `npm run test:isolation` (fresh
-  seed assumed — see the data-plane section).
+  `npm run typecheck`, `npm test` (domain, view, structural and edge
+  gates; no database), `npm run db:rebuild` (reset → seed → isolation
+  proof → route proof → write proof, the one command), `npm run seed`,
+  `npm run test:isolation` (fresh seed assumed — see the data-plane
+  section).
 - Sign in locally as any seeded account:
   `<user-key>@<tenant-slug>.example` / `demo-<tenant-slug>-<user-key>`
   (e.g. `ada@wumpus-widgets.example`). Publishing them on the site is
