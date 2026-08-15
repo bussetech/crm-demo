@@ -52,8 +52,23 @@ const DATETIME = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC",
 });
 
+/** Month + day only — for axis ticks, where the year is chrome, not data. */
+const DATE_SHORT = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
 export const day = (iso: string): string => DATE.format(new Date(iso));
+export const dayShort = (iso: string): string => DATE_SHORT.format(new Date(iso));
 export const stamp = (iso: string): string => `${DATETIME.format(new Date(iso))} UTC`;
+
+/**
+ * A whole-number percentage. Deliberately not rounded to a decimal: a
+ * demo's win rate is a headline, and the counts it came from are printed
+ * beside it, so the reader can always do the division themselves.
+ */
+export const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`;
 
 /** "today" / "3 days ago" / "2 months ago" — relative to a supplied now. */
 export function since(iso: string, now: Date = new Date()): string {

@@ -33,6 +33,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { CrmProfile } from "../env";
 import type { ActivityType } from "../domain/activity";
+import type { MemberRole } from "../domain/roles";
 import type { DealStage } from "../domain/stages";
 import {
   validateActivityBody,
@@ -89,6 +90,9 @@ const DELIBERATE_REFUSALS = [
   "deal not found",
   "you cannot change your own role",
   "you cannot deactivate your own membership",
+  "no membership for that user in this tenant",
+  "membership already has role",
+  "membership is already",
 ] as const;
 
 const refused = (error: { message: string }, what: string): WriteResult<never> => {
@@ -326,6 +330,51 @@ export async function reopenDeal(
   const { error } = await db.rpc("deal_reopen", { p_deal_id: id, p_reason: reason.trim() });
   if (error) return refused(error, "deal_reopen");
   return { ok: true, value: id };
+}
+
+// ------------------------------------------------------------ memberships
+//
+// Tenant administration (CRMDEMO-EPIC1-05). Both of these are RPCs for the
+// same reason `deal_reopen` is: they are privileged acts, so the role
+// check, the no-lockout rule and the audit row all live inside a SECURITY
+// DEFINER function where no client can route around them. `memberships`
+// has no UPDATE policy and no UPDATE grant for anyone — there is no other
+// way to change a role or a status, including for an admin.
+//
+// Nothing is judged here. Whether this caller may administer memberships
+// at all is `crm_require_role`'s answer; whether the target exists in this
+// tenant is the function's; whether the change is a no-op is the
+// function's too. The admin page consults src/domain/roles.ts to decide
+// what to OFFER, and these calls carry whatever it was asked to carry.
+
+export async function setMembershipRole(
+  db: SupabaseClient,
+  profile: CrmProfile,
+  userId: string,
+  role: MemberRole,
+): Promise<WriteResult<string>> {
+  const { error } = await db.rpc("membership_set_role", {
+    p_tenant_id: profile.tenant.id,
+    p_user_id: userId,
+    p_role: role,
+  });
+  if (error) return refused(error, "membership_set_role");
+  return { ok: true, value: userId };
+}
+
+export async function setMembershipActive(
+  db: SupabaseClient,
+  profile: CrmProfile,
+  userId: string,
+  active: boolean,
+): Promise<WriteResult<string>> {
+  const { error } = await db.rpc("membership_set_active", {
+    p_tenant_id: profile.tenant.id,
+    p_user_id: userId,
+    p_active: active,
+  });
+  if (error) return refused(error, "membership_set_active");
+  return { ok: true, value: userId };
 }
 
 // ------------------------------------------------------------ activities

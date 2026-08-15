@@ -93,12 +93,26 @@ describe("nothing renders what this app's own CSP will throw away", () => {
   // assertions: `style-src 'self'` rejects style ATTRIBUTES as well as
   // <style> blocks, so every inline style in the app had been silently
   // dropped since 03. A test runner never enforces a CSP; this grep does.
-  it.each(["src/ui/pages.tsx", "src/ui/forms.tsx", "src/ui/layout.tsx"])(
-    "%s uses classes, never a style attribute",
-    (file) => {
-      expect(read(file)).not.toContain("style=");
-    },
-  );
+  it.each([
+    "src/ui/pages.tsx",
+    "src/ui/forms.tsx",
+    "src/ui/layout.tsx",
+    "src/ui/reports.tsx",
+    "src/ui/admin.tsx",
+    "src/ui/demo.tsx",
+  ])("%s uses classes, never a style attribute", (file) => {
+    expect(read(file)).not.toContain("style=");
+  });
+
+  it("the chart is drawn with geometry, not with the one thing the CSP drops", () => {
+    // An SVG column chart is the CSP-shaped way to draw a bar: width and
+    // height are ATTRIBUTES on markup, where `style="width:42%"` is the
+    // blocked-since-03 kind. Keep it that way.
+    const chart = read("src/ui/reports.tsx");
+    expect(chart).toContain("viewBox");
+    expect(chart).not.toContain("style=");
+    expect(chart).not.toContain("<script");
+  });
 
   it("the policy that makes that true is still the policy", () => {
     expect(router).toContain("style-src 'self'");

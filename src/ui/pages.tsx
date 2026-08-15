@@ -70,9 +70,9 @@ export function LoginPage(props: { error?: string; next?: string; email?: string
     <div class="login">
       <h1>Sign in to CRM Demo</h1>
       <p class="muted lede">
-        Accounts on this demo are provisioned with the scenario data — there is no sign-up,
-        and no account here belongs to a real person. The published demo logins are listed
-        on the studio site.
+        Accounts on this demo are provisioned with the scenario data — there is no sign-up, and no
+        account here belongs to a real person. The published demo logins, and what each persona is
+        for, are on the <a href="/demo">demo logins page</a>.
       </p>
       {props.error ? (
         <p class="note refusal lede-gap" role="alert">

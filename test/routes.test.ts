@@ -18,6 +18,10 @@ import { app } from "../src/index";
 import type { Env } from "../src/env";
 import { buildScenario, type SeedUser, type TenantPlan } from "../src/seed/scenario";
 import { BANNER_TEXT } from "../src/ui/layout";
+import { RESET_POSTURE, demoTenants, resetCopy } from "../src/views/demo";
+import { money } from "../src/views/format";
+import { OPEN_STAGES, type DealStage } from "../src/domain/stages";
+import { ACTIVITY_TYPES } from "../src/domain/activity";
 
 const SUPABASE_URL = process.env["SUPABASE_URL"] ?? "";
 const SUPABASE_ANON_KEY = process.env["SUPABASE_ANON_KEY"] ?? "";
@@ -182,7 +186,7 @@ describe("public surface", () => {
     expect(html.toLowerCase()).not.toContain("create an account");
   });
 
-  it("does not publish demo credentials on the login page (05's act, not this one)", async () => {
+  it("keeps the credentials off the login form itself — they live on /demo", async () => {
     const html = await (await get("/login")).text();
     for (const user of wumpus.users) {
       expect(html).not.toContain(user.email);
@@ -288,8 +292,16 @@ describe("role × route", () => {
     }
   }
 
-  it("the banner text stays the standing one-liner the record names", () => {
-    expect(BANNER_TEXT).toBe("Demo environment — synthetic data, resets on schedule.");
+  it("the banner one-liner states the posture the app is actually in", () => {
+    // It was a written-down constant until 05, and it claimed a schedule
+    // this build does not yet run. It now derives from RESET_POSTURE, so
+    // the banner and the public credentials page cannot tell a visitor two
+    // different stories (src/views/demo.ts).
+    expect(BANNER_TEXT).toBe(
+      RESET_POSTURE.scheduled
+        ? "Demo environment — synthetic data, resets on schedule."
+        : "Demo environment — synthetic data, reset by hand until the scheduled reset ships.",
+    );
   });
 
   it("no page renders a style attribute its own CSP would throw away", async () => {
@@ -482,6 +494,318 @@ describe("detail surfaces", () => {
     const res = await get("/deals/not-a-uuid", cookieOf(wumpus, "ada"));
     expect(res.status).toBe(404);
     expect(await res.text()).toContain("Not found");
+  });
+});
+
+// ------------------------------------------------------------ the 05 surfaces
+//
+// /reports and /admin/users are offered by role. The refusal on /reports is
+// WAYFINDING and the page says so — every member may read the deals it adds
+// up. The refusal on /admin/users is wayfinding too, but the act behind it
+// is genuinely closed: the RPCs check the caller's role themselves, which
+// test/writes.test.ts proves by crafting the request anyway.
+
+describe("role × the manager and admin surfaces", () => {
+  for (const tenant of plan.tenants) {
+    const expectations = [
+      { key: tenant.users.find((u) => u.role === "admin" && u.active)!.key, reports: 200, admin: 200 },
+      { key: tenant.users.find((u) => u.role === "manager" && u.active)!.key, reports: 200, admin: 403 },
+      { key: tenant.users.find((u) => u.role === "rep" && u.active)!.key, reports: 403, admin: 403 },
+    ];
+
+    for (const { key, reports, admin } of expectations) {
+      it(`${tenant.slug}/${key} gets ${reports} from /reports and ${admin} from /admin/users`, async () => {
+        const cookie = cookieOf(tenant, key);
+        const onReports = await get("/reports", cookie);
+        expect(onReports.status).toBe(reports);
+        const onAdmin = await get("/admin/users", cookie);
+        expect(onAdmin.status).toBe(admin);
+
+        // whatever the answer, it is this tenant's page and nobody else's world
+        for (const html of [await onReports.text(), await onAdmin.text()]) {
+          for (const other of plan.tenants.filter((t) => t.slug !== tenant.slug)) {
+            for (const org of other.orgs) expect(html).not.toContain(esc(org.name));
+            for (const user of other.users) expect(html).not.toContain(user.displayName);
+          }
+        }
+      });
+    }
+  }
+
+  it("offers the reports link to a manager and not to a rep", async () => {
+    const managerNav = await (await get("/", cookieOf(wumpus, "morgan"))).text();
+    expect(managerNav).toContain('href="/reports"');
+    expect(managerNav).not.toContain('href="/admin/users"');
+
+    const repNav = await (await get("/", cookieOf(wumpus, "riley"))).text();
+    expect(repNav).not.toContain('href="/reports"');
+    expect(repNav).not.toContain('href="/admin/users"');
+
+    const adminNav = await (await get("/", cookieOf(wumpus, "ada"))).text();
+    expect(adminNav).toContain('href="/reports"');
+    expect(adminNav).toContain('href="/admin/users"');
+  });
+
+  it("tells a rep what the limit on the rollups actually is, without overstating it", async () => {
+    const html = await (await get("/reports", cookieOf(wumpus, "riley"))).text();
+    expect(html).toContain("manager surface");
+    // the honest part: it does not claim the database is keeping this secret
+    expect(html).toContain("one at a time");
+  });
+
+  it("renders no inline style on either surface", async () => {
+    for (const path of ["/reports", "/admin/users"]) {
+      const html = await (await get(path, cookieOf(wumpus, "ada"))).text();
+      expect(html, `${path} renders an inline style`).not.toContain('style="');
+    }
+  });
+
+  it("the admin roster shows every account, active and deactivated, and no controls for self", async () => {
+    const html = await (await get("/admin/users", cookieOf(wumpus, "ada"))).text();
+    for (const user of wumpus.users) expect(html).toContain(user.displayName);
+    expect(html).toContain("Deactivated");
+    // no user creation in v1, and the page says so rather than hiding it
+    expect(html).toContain("does not create accounts");
+    // the signed-in admin's own row carries no role select
+    const ada = wumpus.users.find((u) => u.key === "ada")!;
+    const ownRow = html.slice(html.indexOf(ada.displayName));
+    expect(ownRow.slice(0, ownRow.indexOf("</tr>"))).not.toContain("<select");
+  });
+
+  it("a role select opens on a placeholder, never on a role", async () => {
+    // found by looking at the rendered page: defaulting to the first role
+    // in the vocabulary made every row's one-click action "promote to
+    // tenant admin"
+    const html = await (await get("/admin/users", cookieOf(wumpus, "ada"))).text();
+    const selects = html.match(/<select[\s\S]*?<\/select>/g) ?? [];
+    expect(selects.length).toBeGreaterThan(0);
+    for (const select of selects) {
+      expect(select).toContain('<option value="">');
+      expect(select.indexOf('<option value="">')).toBeLessThan(select.indexOf('<option value="a'));
+    }
+  });
+});
+
+// ------------------------------------------------------------ reconciliation
+//
+// THE RECONCILIATION SPOT-CHECK. Every number a manager reads is traced
+// back to the scenario plan — not to the report module that computed it,
+// which would only prove the code agrees with itself. The chain is:
+// scenario.ts (the seed's spec) → the seeded rows → the rendered page.
+
+/** The count and value cells of one stage row on the rendered report. */
+const stageCells = (html: string, stage: DealStage): { count: number; value: string } => {
+  const re = new RegExp(
+    `/deals\\?stage=${stage}"[\\s\\S]*?<td class="right num">(\\d+)</td>\\s*<td class="right num">([^<]+)</td>`,
+  );
+  const found = html.match(re);
+  expect(found, `no ${stage} row on the report`).toBeTruthy();
+  return { count: Number(found![1]), value: found![2]! };
+};
+
+/** The four numeric cells of one owner's row. */
+const ownerCells = (html: string, displayName: string): string[] => {
+  const re = new RegExp(`>${displayName}</a></td>((?:<td class="right num">[^<]*</td>\\s*){4})`);
+  const found = html.match(re);
+  expect(found, `no row for ${displayName} on the report`).toBeTruthy();
+  return [...found![1]!.matchAll(/<td class="right num">([^<]*)<\/td>/g)].map((m) => m[1]!);
+};
+
+describe("every rendered number reconciles to the seed, exactly", () => {
+  it("the pipeline table's stage counts and values are the plan's deals, stage by stage", async () => {
+    const html = await (await get("/reports", cookieOf(wumpus, "morgan"))).text();
+    for (const stage of ["lead", "qualified", "proposal", "negotiation", "won", "lost"] as const) {
+      const seeded = wumpus.deals.filter((d) => d.targetStage === stage);
+      const cells = stageCells(html, stage);
+      expect(cells.count, `${stage} count`).toBe(seeded.length);
+      expect(cells.count, `${stage} count vs the plan's own expectation`).toBe(
+        wumpus.expected.dealsByStage[stage],
+      );
+      expect(cells.value, `${stage} value`).toBe(
+        money(seeded.reduce((total, d) => total + d.amount, 0)),
+      );
+    }
+  });
+
+  it("the owner cut is the same deals again, per owner", async () => {
+    const html = await (await get("/reports", cookieOf(wumpus, "morgan"))).text();
+    const ownerKeys = [...new Set(wumpus.deals.map((d) => d.ownerKey))];
+    for (const key of ownerKeys) {
+      const user = wumpus.users.find((u) => u.key === key)!;
+      const theirs = wumpus.deals.filter((d) => d.ownerKey === key);
+      const open = theirs.filter((d) =>
+        (OPEN_STAGES as readonly DealStage[]).includes(d.targetStage),
+      );
+      const cells = ownerCells(html, user.displayName);
+      expect(cells[0], `${key} open count`).toBe(String(open.length));
+      expect(cells[1], `${key} open value`).toBe(
+        money(open.reduce((total, d) => total + d.amount, 0)),
+      );
+      expect(cells[2], `${key} deal count`).toBe(String(theirs.length));
+      expect(cells[3], `${key} value`).toBe(
+        money(theirs.reduce((total, d) => total + d.amount, 0)),
+      );
+    }
+  });
+
+  it("the activity volume totals the plan's activities, by kind and altogether", async () => {
+    const html = await (await get("/reports", cookieOf(wumpus, "morgan"))).text();
+    const footer = html.match(
+      /<th>(\d+) weeks<\/th>\s*((?:<td class="right num">\d+<\/td>\s*){5})/,
+    );
+    expect(footer, "no total row on the activity table").toBeTruthy();
+    const weeks = Number(footer![1]);
+    const cells = [...footer![2]!.matchAll(/<td class="right num">(\d+)<\/td>/g)].map((m) =>
+      Number(m[1]),
+    );
+
+    // the whole seeded trail falls inside the window, so the page's total
+    // is the plan's count — if the seed ever reaches further back than the
+    // report's window, this is the assertion that says so
+    const oldest = Math.max(...wumpus.activities.map((a) => a.daysAgo));
+    expect(oldest, "the seed now reaches past the report window").toBeLessThan(weeks * 7);
+
+    ACTIVITY_TYPES.forEach((type, i) => {
+      expect(cells[i], `${type} total`).toBe(
+        wumpus.activities.filter((a) => a.type === type).length,
+      );
+    });
+    expect(cells[4], "activity total").toBe(wumpus.activities.length);
+    expect(cells[4]).toBe(wumpus.expected.activities);
+  });
+
+  it("the win rate is the plan's won and lost, divided", async () => {
+    const html = await (await get("/reports", cookieOf(wumpus, "morgan"))).text();
+    const won = wumpus.expected.dealsByStage.won;
+    const lost = wumpus.expected.dealsByStage.lost;
+
+    const rate = html.match(/<span class="n num">(\d+)%<\/span><span class="eyebrow">Win rate/);
+    expect(rate, "no win rate on the report").toBeTruthy();
+    expect(Number(rate![1])).toBe(Math.round((won / (won + lost)) * 100));
+
+    for (const [label, count] of [
+      ["Won", won],
+      ["Lost", lost],
+    ] as const) {
+      const tile = html.match(
+        new RegExp(`<span class="n num">(\\d+)</span><span class="eyebrow">${label}</span>`),
+      );
+      expect(tile, `no ${label} tile`).toBeTruthy();
+      expect(Number(tile![1]), label).toBe(count);
+    }
+  });
+
+  it("a tenant that has closed nothing gets no win rate rather than a 0%", async () => {
+    // moonrise seeds no won and no lost deals — the empty-data case a demo
+    // is most likely to render as a made-up zero
+    expect(moonrise.expected.dealsByStage.won + moonrise.expected.dealsByStage.lost).toBe(0);
+    const html = await (await get("/reports", cookieOf(moonrise, "marco"))).text();
+    expect(html).toContain("Nothing has closed");
+    expect(html).not.toContain('class="eyebrow">Win rate');
+  });
+
+  it("the pipeline totals agree with the deal list the same reader can count by hand", async () => {
+    const html = await (await get("/reports", cookieOf(wumpus, "morgan"))).text();
+    const all = wumpus.deals.reduce((total, d) => total + d.amount, 0);
+    const open = wumpus.deals.filter((d) =>
+      (OPEN_STAGES as readonly DealStage[]).includes(d.targetStage),
+    );
+    expect(html).toContain(
+      `<span class="n num">${open.length}</span><span class="eyebrow">Open deals</span>`,
+    );
+    expect(html).toContain(
+      `<span class="n num">${money(open.reduce((t, d) => t + d.amount, 0))}</span><span class="eyebrow">Open pipeline</span>`,
+    );
+    expect(html).toContain(
+      `<span class="n num">${money(all)}</span><span class="eyebrow">Value all-time</span>`,
+    );
+  });
+});
+
+// ------------------------------------------------------------ the front door
+
+describe("the demo logins page", () => {
+  it("is public, and needs no session at all", async () => {
+    const res = await get("/demo");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+  });
+
+  it("publishes every seeded account of every tenant, as seeded", async () => {
+    const html = await (await get("/demo")).text();
+    for (const tenant of demoTenants()) {
+      expect(html).toContain(esc(tenant.name));
+      for (const login of tenant.logins) {
+        expect(html, `${login.email} is not published`).toContain(login.email);
+        expect(html, `${login.email}'s password is not published`).toContain(login.password);
+        expect(html).toContain(login.displayName);
+      }
+    }
+  });
+
+  it("EVERY published credential actually works — a stale page is a failed demo", async () => {
+    for (const tenant of demoTenants()) {
+      for (const login of tenant.logins) {
+        const res = await postForm("/login", { email: login.email, password: login.password });
+        if (login.active) {
+          expect(res.status, `${login.email} is published but cannot sign in`).toBe(303);
+        } else {
+          // published on purpose: the refusal is a demo beat
+          expect(res.status, `${login.email} is published as deactivated`).toBe(401);
+          expect(await res.text()).toContain("deactivated");
+        }
+      }
+    }
+  });
+
+  it("publishes nothing beyond the credentials — no tenant's rows are on it", async () => {
+    const html = await (await get("/demo")).text();
+    for (const tenant of plan.tenants) {
+      for (const org of tenant.orgs) expect(html).not.toContain(esc(org.name));
+      for (const deal of tenant.deals) expect(html).not.toContain(esc(deal.name));
+      for (const person of tenant.people) {
+        expect(html).not.toContain(`${person.firstName} ${person.lastName}`);
+      }
+    }
+  });
+
+  it("states the posture plainly, and the reset posture it is actually in", async () => {
+    const html = await (await get("/demo")).text();
+    expect(html).toContain(esc(resetCopy()));
+    if (!RESET_POSTURE.scheduled) expect(html).toContain("not running yet");
+    expect(html).toContain("no SLA");
+    expect(html).toContain("Demo environment");
+    expect(html.toLowerCase()).toContain("self-signup is disabled");
+    expect(html).toContain(".example");
+  });
+
+  it("invites the isolation beat by name", async () => {
+    const html = await (await get("/demo")).text();
+    expect(html).toContain(esc(wumpus.name));
+    expect(html).toContain(esc(bandersnatch.name));
+    expect(html).toContain("not found");
+  });
+
+  it("renders no inline style", async () => {
+    expect(await (await get("/demo")).text()).not.toContain('style="');
+  });
+
+  it("is where the login page sends a visitor, and the login page still publishes nothing", async () => {
+    const html = await (await get("/login")).text();
+    expect(html).toContain('href="/demo"');
+    for (const tenant of plan.tenants) {
+      for (const user of tenant.users) {
+        expect(html).not.toContain(user.email);
+        expect(html).not.toContain(user.password);
+      }
+    }
+  });
+
+  it("is linked from the standing banner, on every page", async () => {
+    for (const path of ["/login", "/demo", "/"]) {
+      const cookie = path === "/" ? cookieOf(wumpus, "ada") : undefined;
+      expect(await (await get(path, cookie)).text()).toContain('<a href="/demo">');
+    }
   });
 });
 
