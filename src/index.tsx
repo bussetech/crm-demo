@@ -37,6 +37,7 @@ import {
 } from "./auth";
 import { anonClient, userClient } from "./db";
 import type { CrmProfile, Env } from "./env";
+import { LOGIN_RATE, WRITE_RATE, callerKey, createLimiter } from "./limits";
 import { ACTIVITY_TYPES, isActivityType } from "./domain/activity";
 import {
   canCreateDeal,
@@ -248,11 +249,40 @@ app.use("*", async (c, next) => {
  */
 const MAX_BODY_BYTES = 4096;
 
+/**
+ * No uploads, structurally (track law 3): every form here posts
+ * urlencoded, so a multipart body — the only shape a file arrives in — is
+ * refused before anything reads it. The body cap already bounds the
+ * bytes; this bounds the KIND.
+ */
+const isMultipart = (contentType: string | undefined): boolean =>
+  (contentType ?? "").toLowerCase().startsWith("multipart/");
+
+// Basic rate limiting (track law 3; the floor — crm-demo#14 keeps the
+// go-live upgrade decision open). Per-caller fixed windows, sign-in
+// stricter than the rest; a caller the edge has not named is not counted
+// (src/limits.ts says why that is honest rather than a hole).
+const loginLimiter = createLimiter(LOGIN_RATE);
+const writeLimiter = createLimiter(WRITE_RATE);
+
 app.use("*", async (c, next) => {
   if (c.req.method === "POST") {
     const declared = Number(c.req.header("content-length") ?? "0");
     if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
       return c.text("Request body too large", 413);
+    }
+    if (isMultipart(c.req.header("content-type"))) {
+      return c.text("File uploads are not accepted anywhere on this site", 415);
+    }
+    const key = callerKey(c.req.raw.headers);
+    if (key !== null) {
+      const path = new URL(c.req.url).pathname;
+      const limiter = path === "/login" ? loginLimiter : writeLimiter;
+      const now = Date.now();
+      if (!limiter.take(key, now)) {
+        c.header("retry-after", String(limiter.retryAfterSeconds(key, now)));
+        return c.text("Too many requests — slow down and try again", 429);
+      }
     }
     if (!sameOrigin(c)) return c.text("Cross-origin form posts are refused", 403);
   }
@@ -277,6 +307,30 @@ app.get("/app.css", (c) =>
 );
 
 /**
+ * The crawl policy matches the index policy: the app's pages are a
+ * signed-in surface behind a login redirect and carry `noindex`; /demo is
+ * THE FRONT DOOR — public on purpose, indexable on purpose (its shell
+ * omits the `noindex` every other page ships). Blanket-disallowing with
+ * one Allow keeps a crawler from wandering the redirect maze.
+ */
+const ROBOTS_TXT = [
+  "# crm-demo — a live demo with a signed-in app surface.",
+  "# The public credentials page is the one page a crawler is invited to read.",
+  "User-agent: *",
+  "Allow: /demo",
+  "Allow: /robots.txt",
+  "Disallow: /",
+  "",
+].join("\n");
+
+app.get("/robots.txt", (c) =>
+  c.body(ROBOTS_TXT, 200, {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "public, max-age=3600",
+  }),
+);
+
+/**
  * The demo logins page — public, and registered here with the other
  * unauthenticated routes because it is the FRONT DOOR: a visitor who has
  * not signed in yet is exactly its audience, and reading it should never
@@ -287,7 +341,17 @@ app.get("/app.css", (c) =>
  * page lists, and vice versa. The route proof signs in with every one of
  * them to keep that from being a claim.
  */
-app.get("/demo", (c) => page(c, publicPage(c, "Demo logins", <DemoLoginsPage />)));
+app.get("/demo", (c) =>
+  page(
+    c,
+    // `indexable`: the ONE page without the blanket noindex — 05 shipped
+    // /demo noindex-like-everything; 06 reverses that deliberately (the
+    // credentials page is the front door, and robots.txt points at it).
+    <PublicShell title="Demo logins" buildId={c.env.APP_BUILD_ID ?? "dev"} indexable>
+      <DemoLoginsPage />
+    </PublicShell>,
+  ),
+);
 
 // Everything below resolves the session first (an absent one attaches
 // nothing and falls through).
@@ -1499,6 +1563,7 @@ function isUuid(value: string | undefined): value is string {
 export const ROUTES = [
   "/healthz",
   "/app.css",
+  "/robots.txt",
   "/login",
   "/logout",
   "/",
