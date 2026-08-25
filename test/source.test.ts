@@ -7,7 +7,7 @@
 // now that adds `if (role === "manager")` to a handler because it was
 // quicker than importing the domain module — the moment the twin rules
 // (pure TS + database) stop being the only two places a rule lives.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -123,16 +123,49 @@ describe("nothing renders what this app's own CSP will throw away", () => {
 });
 
 describe("the service plane stays out of the request path", () => {
-  it.each(["src/index.tsx", "src/env.ts", "src/db.ts", "src/views/writes.ts", "src/views/model.ts"])(
-    "%s cannot reach for a service-role key",
-    (file) => {
-      expect(read(file)).not.toContain("SERVICE_ROLE");
-    },
-  );
+  it.each([
+    "src/index.tsx",
+    "src/env.ts",
+    "src/db.ts",
+    "src/auth.ts",
+    "src/limits.ts",
+    "src/views/writes.ts",
+    "src/views/model.ts",
+  ])("%s cannot reach for a service-role key", (file) => {
+    expect(read(file)).not.toContain("SERVICE_ROLE");
+  });
 
   it("the binding surface has no field a service-role client could be built from", () => {
     const env = read("src/env.ts");
     expect(env).toContain("SUPABASE_ANON_KEY");
     expect(env.toLowerCase()).not.toContain("service");
+  });
+
+  // CRMDEMO-EPIC1-06: the reset job DOES hold the service-role key — in
+  // the JOB PLANE (src/worker.ts + src/jobs/*), which the app router
+  // never imports. These gates keep the two planes two.
+  it("only the job plane and the seed engine may name the service-role binding", () => {
+    const allowed = new Set(["src/worker.ts", "src/jobs/reset.ts", "src/seed/runner.ts"]);
+    const walk = (dir: string): string[] =>
+      readdirSync(join(repoRoot, dir), { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`],
+      );
+    const offenders = walk("src").filter(
+      (file) => !allowed.has(file) && read(file).includes("SERVICE_ROLE"),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("the app router never imports the job plane", () => {
+    expect(router).not.toContain("jobs/reset");
+    expect(router).not.toContain("./worker");
+  });
+
+  it("the job plane's dispatch doors are token-gated and closed by default", () => {
+    const workerSource = read("src/worker.ts");
+    expect(workerSource).toContain("RESET_DISPATCH_TOKEN");
+    // the unprovisioned surface answers 404 — asserted behaviourally in
+    // test/limits.test.ts; here we pin that the gate exists at all
+    expect(workerSource).toContain("404");
   });
 });
