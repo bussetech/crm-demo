@@ -50,9 +50,9 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   self-signup disabled; accounts seed-provisioned). Roles per tenant:
   rep / manager / tenant-admin (exact set fixed by the schema sessions).
 - **Scheduled reset to scenario baseline** — Workers cron in the app plane
-  (never GitHub Actions), receipt per run in `job_runs`. Cadence: H-class
-  ruling open on platform (recommended default nightly 04:00 ET +
-  on-demand dispatch + demo-freeze switch).
+  (never GitHub Actions), receipt per run in `job_runs`. Cadence ruled
+  (GD-0035) and BUILT at 06: nightly 04:00 ET + on-demand dispatch +
+  demo-freeze switch (see the 06 section below).
 - **The four demo scenarios** (seeds are built to these):
   1. Pipeline walkthrough — deals across stages to a close.
   2. Day-in-the-life data entry — a rep logging activities and contacts.
@@ -90,9 +90,9 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   own lifecycle exercises add audit rows, so re-runs want `npm run
   db:rebuild` (reset → seed → the three proofs, the one command). Green
   in CI as a launch-blocker job (`isolation-proof`).
-- `crm_demo_wipe()` (service-plane-only RPC) + `scripts/seed.ts` are the
-  reset primitives the scheduled reset job (GD-0035: nightly 04:00 ET +
-  on-demand + demo-freeze) composes later.
+- `crm_demo_wipe()` (service-plane-only RPC) + the seed engine are the
+  reset primitives; the reset job (GD-0035) composes them since 06 —
+  engine in `src/seed/runner.ts`, job in `src/jobs/reset.ts`.
 
 ## The app plane (CRMDEMO-EPIC1-03 — of record)
 
@@ -234,6 +234,65 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   tooltip a no-JavaScript page can offer, and every number is repeated in
   a table beneath so nothing is gated behind the picture.
 
+## Demo ops, containment & the ship path (CRMDEMO-EPIC1-06 — of record)
+
+- **Two planes, one deployable.** `wrangler.toml` points at
+  `src/worker.ts`, which routes `/jobs/*` and the cron to the JOB PLANE
+  (`src/jobs/reset.ts`) and delegates everything else to the app
+  (`src/index.tsx`) untouched. The job plane holds
+  `SUPABASE_SERVICE_ROLE_KEY` as a Workers secret (07 provisions it); the
+  request path still cannot build a service client — `src/env.ts` has no
+  such field and `test/source.test.ts` asserts only the job plane and the
+  seed engine may name the binding, and that the router never imports
+  either.
+- **The reset job** (GD-0035: nightly 04:00 ET + on-demand + freeze):
+  cron `0 8 * * *` UTC in `wrangler.toml` (04:00 EDT; 03:00 EST in
+  winter — stated, not solved); dispatch routes `POST /jobs/reset`,
+  `/jobs/freeze`, `/jobs/unfreeze`, bearer-authenticated by
+  `RESET_DISPATCH_TOKEN` and answering **404 until that secret exists** —
+  the unprovisioned pipeline proves itself with no secrets anywhere.
+  Every run journals to `job_runs` (`detail.trigger`; a frozen run is
+  `skipped: frozen`, an honest no-op with a receipt). **The freeze gates
+  dispatched resets too** — thaw first when a reset is really wanted.
+- **One seed engine, two doors.** `src/seed/runner.ts` is the engine;
+  `scripts/seed.ts` (CLI) and the reset job both call it, so the reset
+  cannot drift from the seed. The engine journals nothing — each caller
+  writes its own receipt (`job: "seed"` vs `"reset"`). Accounts are
+  matched by email and memberships rebuilt from the plan, which is why a
+  reset restores DEMO-ACCOUNT STATE (roles, deactivations) as well as
+  data.
+- **The freeze switch lives in `app_settings`** (`demo_freeze`) — service
+  plane only, like `job_runs` (RLS on, NO policies; SELECT granted so a
+  denied read is zero rows; explicit service_role grant — new tables do
+  not inherit the 04 matrix). It survives resets and isolate recycling.
+- **Containment (track law 3), all tested in `test/limits.test.ts`:**
+  4 KB body cap; any `multipart/*` POST refused 415 (no uploads,
+  structurally); per-caller fixed-window rate limits (sign-in 10/min,
+  other writes 60/min, 429 + Retry-After), keyed by `CF-Connecting-IP`
+  and **standing aside for callers the edge has not named** (tests,
+  wrangler dev) — a floor, not a ceiling: crm-demo#14 keeps the
+  CF-native-binding decision for 07. Accepted residual is stated in
+  `docs/demo-ops.md`: defacement of a synthetic tenant between resets is
+  self-healing by design.
+- **Crawl/index policy:** `/robots.txt` disallows the app and invites
+  crawlers to exactly one page — `/demo`, which is also the ONE page
+  without the blanket `noindex` (06 deliberately reversed 05's
+  noindex-everywhere decision for the front door; the prompt's words:
+  "the credentials page stays indexable — it's the front door").
+- **`RESET_POSTURE.scheduled` is `true`** (crm-demo#18, flipped in the
+  same PR as the job): the banner and `/demo` now say resets run on
+  schedule. Nothing is public until 07 deploys — and deploying is what
+  registers the cron, so the claim and the machinery cannot ship apart.
+- **The gate is now FOUR proofs:** isolation → routes → writes → **reset**
+  (`test/reset.test.ts`, wipes-and-reseeds, runs dead last, leaves the
+  stack at the fresh baseline). `npm run db:rebuild` is still the one
+  command; CI also dry-runs the deploy bundle (`npm run deploy:check`).
+- **The 07 checklist is `docs/runbooks/provisioning.md`** — hosted
+  Supabase, Workers secrets, deploy credential, custom domain, the freeze
+  drill, and the cross-plane registry/UAT edits. The Workers **paid
+  plan** is a named cost fact there (the reset makes several hundred
+  subrequests; the free cap is 50).
+
 ## Local development
 
 - **Port block: 5444x** (54440–54449) — recorded here per the studio's
@@ -246,11 +305,12 @@ writing a line. Epic handoffs: `platform/docs/handoffs/CRMDEMO-EPIC1-NN.md`.
   per-worktree.
 - `npm run dev` (wrangler, with the running local stack's URL + anon key
   bridged in by `scripts/dev.sh` — never the service-role key),
-  `npm run typecheck`, `npm test` (domain, view, structural and edge
-  gates; no database), `npm run db:rebuild` (reset → seed → isolation
-  proof → route proof → write proof, the one command), `npm run seed`,
-  `npm run test:isolation` (fresh seed assumed — see the data-plane
-  section).
+  `npm run typecheck`, `npm test` (domain, view, structural, containment
+  and edge gates; no database), `npm run db:rebuild` (reset → seed →
+  isolation proof → route proof → write proof → reset proof, the one
+  command), `npm run seed`, `npm run test:isolation` (fresh seed assumed —
+  see the data-plane section), `npm run deploy:check` (the deploy bundle
+  dry-run CI also runs).
 - Sign in locally as any seeded account:
   `<user-key>@<tenant-slug>.example` / `demo-<tenant-slug>-<user-key>`
   (e.g. `ada@wumpus-widgets.example`) — or read them off `/demo`, which

@@ -32,11 +32,12 @@ platform ADR-0055.
 
 | path | what |
 | --- | --- |
-| `src/` | the Worker (Hono app; `/healthz` is the only route so far) + pure domain modules (`src/domain/`) + the scenario plan (`src/seed/`) |
-| `supabase/` | local stack config + migrations: schema with invariants → deny-by-default RLS → audited RPCs → the explicit grant matrix |
-| `scripts/` | `seed.ts` (deterministic scenario seeds — they walk the real lifecycle) + stack env-bridge helpers |
-| `test/` | pure domain gates (no database) + **THE ISOLATION PROOF** (`isolation.test.ts`) — a launch blocker, run in CI against a real local stack |
-| `.github/workflows/` | project CI (incl. the isolation-proof job) + studio app-CI shell + dispatch-only deploy |
+| `src/` | the Worker: the app plane (`index.tsx`, every user-facing route) + the job plane (`worker.ts` + `jobs/`, the reset cron and its dispatch doors) + pure domain modules (`src/domain/`) + the scenario plan and seed engine (`src/seed/`) |
+| `supabase/` | local stack config + migrations: schema with invariants → deny-by-default RLS → audited RPCs → the explicit grant matrix → the demo-freeze switch's home |
+| `scripts/` | `seed.ts` (the CLI door onto the seed engine — seeds walk the real lifecycle) + stack env-bridge helpers |
+| `test/` | pure domain/containment gates (no database) + the four stack proofs — **THE ISOLATION PROOF** (`isolation.test.ts`, a launch blocker), the route proof, the write proof, and the reset proof — run in CI against a real local stack |
+| `docs/` | `demo-ops.md` (reset, freeze, containment posture + accepted residual) + `runbooks/provisioning.md` (the go-live checklist) |
+| `.github/workflows/` | project CI (incl. the isolation-proof job and a deploy-bundle dry-run) + studio app-CI shell + dispatch-only deploy with receipts |
 
 ## Build locally
 
@@ -44,7 +45,7 @@ platform ADR-0055.
 npm ci
 npm run typecheck && npm test   # no database needed
 supabase start                  # local stack on ports 54440–54449 (see CLAUDE.md)
-npm run db:rebuild              # reset → scenario seed → THE ISOLATION PROOF
+npm run db:rebuild              # reset → scenario seed → the four proofs (isolation first)
 ```
 
 No studio access needed. See `CLAUDE.md` for conventions and the detach
