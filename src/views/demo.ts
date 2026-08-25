@@ -71,9 +71,15 @@ export const PERSONA: Record<MemberRole, string> = {
  * ***THE SESSION THAT SHIPS THE RESET JOB FLIPS THIS TO `true`.*** It is
  * the one edit that changes what the credentials page and the standing
  * banner both say, because both read it here.
+ *
+ * Flipped by CRMDEMO-EPIC1-06 (crm-demo#18), in the same PR that ships
+ * the job: the cron trigger, the dispatch path and the freeze switch land
+ * together with this line, so the claim and the machinery cannot ship
+ * apart. (Nothing is public until 07 deploys — at go-live the schedule is
+ * genuinely running, because deploying IS what registers the cron.)
  */
 export const RESET_POSTURE = {
-  scheduled: false,
+  scheduled: true,
   cadence: "nightly at 04:00 ET",
 } as const;
 
