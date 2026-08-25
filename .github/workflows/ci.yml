@@ -33,6 +33,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # the deploy pipeline must prove itself without secrets (CRMDEMO-
+      # EPIC1-06): a dry-run bundles the Worker without touching Cloudflare
+      - name: the deploy bundle builds (wrangler dry-run)
+        run: npm run deploy:check
 
   isolation-proof:
     runs-on: ubuntu-latest

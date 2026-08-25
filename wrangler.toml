@@ -8,7 +8,9 @@
 # provisioning act (CRMDEMO-EPIC1-07, the sysop's clock); no route is
 # configured here until then.
 name = "crm-demo"
-main = "src/index.tsx"
+# Two planes, one deployable: src/worker.ts routes /jobs/* + the cron to
+# the job plane and delegates everything else to the app (src/index.tsx).
+main = "src/worker.ts"
 compatibility_date = "2026-07-01"
 # supabase-js relies on Node builtins (Buffer); nodejs_compat is the
 # supported Workers path for it (stratum gotcha).
@@ -20,11 +22,16 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 
 # The reset-to-baseline job runs in the APP PLANE (stratum law — never
-# GitHub Actions). Cadence is an open H-class ruling (recommended default:
-# nightly 04:00 ET = 08:00 UTC); the cron lands with the reset job itself
-# in a later session — declared here as intent, not yet scheduled.
-# [triggers]
-# crons = ["0 8 * * *"]
+# GitHub Actions). Cadence is GD-0035 (platform#429, recommendation
+# accepted): nightly 04:00 ET + on-demand dispatch + demo-freeze switch.
+# Workers cron is UTC, so 08:00 UTC = 04:00 EDT; in winter it fires at
+# 03:00 EST — an hour early against synthetic data, stated rather than
+# solved (a DST-tracking cron would need two triggers and a guard for no
+# demo gain). The trigger registers at deploy time (07's provisioning act);
+# until then nothing schedules anything, and the handler itself no-ops
+# loudly without SUPABASE_SERVICE_ROLE_KEY (a Workers secret, 07).
+[triggers]
+crons = ["0 8 * * *"]
 
 # Non-secret vars. SUPABASE_URL is per-environment; the anon key is public
 # by design (RLS is the boundary); the service-role key is a Workers

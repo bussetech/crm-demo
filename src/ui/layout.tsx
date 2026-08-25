@@ -63,12 +63,18 @@ function Banner() {
   );
 }
 
-function Head({ title }: { title: string }) {
+/**
+ * `noindex` on every page except the one that is deliberately findable:
+ * the /demo front door (CRMDEMO-EPIC1-06; robots.txt matches — it is the
+ * one path a crawler is invited to read). App pages sit behind a login
+ * redirect anyway; the meta is the belt to that suspender.
+ */
+function Head({ title, indexable }: { title: string; indexable?: boolean }) {
   return (
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <meta name="robots" content="noindex" />
+      {indexable ? null : <meta name="robots" content="noindex" />}
       <title>{title} · CRM Demo</title>
       <link rel="stylesheet" href="/app.css" />
     </head>
@@ -145,10 +151,15 @@ export function Shell(props: {
   );
 }
 
-export function PublicShell(props: { title: string; buildId: string; children?: Child }) {
+export function PublicShell(props: {
+  title: string;
+  buildId: string;
+  indexable?: boolean;
+  children?: Child;
+}) {
   return (
     <html lang="en">
-      <Head title={props.title} />
+      <Head title={props.title} indexable={props.indexable} />
       <body>
         <Banner />
         <main id="main">{props.children}</main>

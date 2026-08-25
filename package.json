@@ -7,12 +7,13 @@
   "scripts": {
     "dev": "scripts/dev.sh",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude 'test/isolation.test.ts' --exclude 'test/routes.test.ts' --exclude 'test/writes.test.ts'",
+    "test": "vitest run --exclude 'test/isolation.test.ts' --exclude 'test/routes.test.ts' --exclude 'test/writes.test.ts' --exclude 'test/reset.test.ts'",
     "test:isolation": "scripts/run-isolation.sh",
     "seed": "scripts/stack-env.sh npx tsx scripts/seed.ts",
     "db:reset": "supabase db reset",
     "db:rebuild": "supabase db reset && npm run seed && npm run test:isolation",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "deploy:check": "wrangler deploy --dry-run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
